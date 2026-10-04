@@ -1,0 +1,152 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+// ---------------------------------------------------------------------------
+// 签名配置外部化
+//
+// 仓库内不含任何密钥文件。要把 release 包构建出来并通过 adb 安装，
+// 请在工程根目录建 keystore.properties（已在 .gitignore 中忽略）：
+//
+//   storeFile=freedom-release.jks
+//   storePassword=<你的密钥库口令>
+//   keyAlias=freedom
+//   keyPassword=<你的密钥口令>
+//
+// storeFile 支持相对工程根目录的相对路径，也支持绝对路径。
+// 不配置该文件时，release 变体不会被签名，assembleRelease 仍可正常产出未签名 APK。
+// 生成新密钥的命令见 docs/构建.md。
+// ---------------------------------------------------------------------------
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+def hasSigningConfig = keystoreProps.getProperty("storeFile") != null
+def resolvedStoreFile = hasSigningConfig
+        ? (rootProject.file(keystoreProps.getProperty("storeFile")).exists()
+        ? rootProject.file(keystoreProps.getProperty("storeFile"))
+        : file(keystoreProps.getProperty("storeFile")))
+        : null
+
+android {
+    namespace "io.github.fplus"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "io.github.fplus"
+        minSdk 24
+        targetSdk 33
+
+        versionCode 142
+        versionName "1.3.6"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+    aaptOptions {
+        additionalParameters '--allow-reserved-package-id', '--package-id', '0x64'
+    }
+    signingConfigs {
+        // 仅当 keystore.properties 存在且指向真实密钥库时才注册签名配置。
+        // 见文件顶部的说明。
+        if (hasSigningConfig) {
+            release {
+                storeFile resolvedStoreFile
+                storePassword keystoreProps.getProperty("storePassword")
+                keyAlias keystoreProps.getProperty("keyAlias")
+                keyPassword keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            if (hasSigningConfig) {
+                signingConfig signingConfigs.release
+            }
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+
+        debug {
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    kotlinOptions {
+        jvmTarget = "11"
+    }
+    buildFeatures {
+        compose true
+    }
+    composeOptions {
+        kotlinCompilerExtensionVersion "1.4.3"
+    }
+    packagingOptions {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    // 更新version的内容
+    tasks.register("updateVersionFile") {
+        def versionName = android.defaultConfig.versionName
+        def versionCode = android.defaultConfig.versionCode
+        def versionContent = versionName + "-" + versionCode
+
+        File versionFile = file("src/main/assets/version")
+        versionFile.write(versionContent)
+    }
+
+    //执行task任务
+    applicationVariants.configureEach { variant ->
+        variant.assembleProvider.get().dependsOn updateVersionFile
+
+        variant.outputs.configureEach { output ->
+            def filename = "freedom+_" + android.defaultConfig.versionName + ".apk"
+            output.outputFileName filename
+        }
+    }
+}
+
+dependencies {
+    implementation(libs.core.ktx)
+    implementation(libs.lifecycle.runtime.ktx)
+    implementation(libs.documentfile)
+
+    //compose
+    implementation(libs.activity.compose)
+    implementation(platform(libs.compose.bom))
+    implementation(libs.ui)
+    implementation(libs.ui.graphics)
+    implementation(libs.ui.tooling.preview)
+    implementation(libs.compose.material)
+
+    // custom
+    implementation(libs.accompanist.systemuicontroller)
+    implementation(libs.runtime.livedata)
+    implementation(libs.mmkv)
+
+    implementation project(":core")
+    implementation project(":webdav")
+    implementation project(":ktutils")
+}
