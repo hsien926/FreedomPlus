@@ -14,8 +14,10 @@
 |---|---|---|
 | 上游基座 | [xiaodesetingyongzhanghao/FreedomPlus](https://github.com/xiaodesetingyongzhanghao/FreedomPlus) | 本项目的起点。工程结构、`app` / `core` / `aweme` 三模块划分、混淆字典 `app/dic.txt`、模块配置与设置界面均继承自此处 |
 | 上游演进版本 | [FairyWorld/lsposed_FreedomPlus](https://github.com/FairyWorld/lsposed_FreedomPlus) | 本项目 `core` 模块下的 hook 实现与资源文件与之同源：**168 个文件内容逐字节相同**，另在 16 个文件上做了修改、新增 6 个 hook 类 |
-| 工具库（子模块） | [GangJust/ktutils](https://github.com/GangJust/ktutils) | `ktutils/` 目录，**80 个文件逐字节相同**，未做修改。包名保持上游的 `com.freegang.ktutils` 不变，以便与上游持续同步 |
-| 框架封装（子模块） | [ThatWorld/xpler](https://github.com/ThatWorld/xpler) | `xpler/` 目录，34 个文件中的 33 个与上游相同，仅对 `build.gradle.kts` 做了本地化调整（移除发布与签名插件） |
+| 工具库 | [GangJust/ktutils](https://github.com/GangJust/ktutils) | `ktutils/` 目录，**80 个文件逐字节相同**，未做修改。包名保持上游的 `com.freegang.ktutils` 不变，以便与上游持续同步 |
+| 框架封装 | [ThatWorld/xpler](https://github.com/ThatWorld/xpler) | `xpler/` 目录，34 个文件中的 33 个与上游相同，仅对 `build.gradle.kts` 做了本地化调整（移除发布与签名插件） |
+
+> 上述两个目录在本仓库中以**普通目录**形式纳入版本控制（非 git submodule），以便 `git clone` 后即可直接构建。
 
 上述上游项目均由 **Gang** 开发并以 GPL-3.0 协议开源。本项目按 GPL-3.0 的要求继承该协议，并在 [LICENSE](./LICENSE) 中保留原始版权声明。
 
