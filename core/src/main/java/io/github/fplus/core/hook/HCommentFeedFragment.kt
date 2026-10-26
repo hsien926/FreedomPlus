@@ -50,12 +50,38 @@ class HCommentFeedFragment : BaseHook() {
             } ?: emptyList()
     }
 
+    /**
+     * 动图：取这张图挂的短视频地址，空表示静态图。
+     *
+     * 评论区动图在数据层是「静态图 + 一段短视频」，短视频就是 `CommentImageStruct`
+     * 里的 `CommentImageLiveVideoStruct`（其 `url_list` 是视频地址）。
+     * 类名未混淆（39.9.0 / 40.8.0 都有），字段名被混淆成单字母，所以按类型找。
+     */
+    private fun resolveLiveVideoUrlList(imageStruct: Any): List<String> {
+        val liveVideo = imageStruct.javaClass.declaredFields
+            .mapNotNull { runCatching { it.isAccessible = true; it.get(imageStruct) }.getOrNull() }
+            .firstOrNull { it.javaClass.name.endsWith("CommentImageLiveVideoStruct") }
+            ?: return emptyList()
+
+        return liveVideo.javaClass.declaredFields
+            .mapNotNull { runCatching { (it.apply { isAccessible = true }.get(liveVideo) as? List<*>) }.getOrNull() }
+            .firstOrNull { it.isNotEmpty() }
+            ?.filterIsInstance<String>()
+            ?: emptyList()
+    }
 
     /** 要保存的那张：翻到第几页就取第几张（越界则退回第一张） */
     private fun currentImageUrlList(): List<String> {
         if (imageStructs.isEmpty()) return emptyList()
         val index = currentPage.coerceIn(0, imageStructs.size - 1)
         return resolveImageUrlList(imageStructs[index])
+    }
+
+    /** 当前这张如果是动图，返回它的视频地址（空 = 静态图） */
+    private fun currentLiveVideoUrlList(): List<String> {
+        if (imageStructs.isEmpty()) return emptyList()
+        val index = currentPage.coerceIn(0, imageStructs.size - 1)
+        return resolveLiveVideoUrlList(imageStructs[index])
     }
 
     override fun setTargetClass(): Class<*> {
@@ -147,10 +173,25 @@ class HCommentFeedFragment : BaseHook() {
                                     "点击保存: 图片数=${imageStructs.size}, currentPage=$currentPage",
                                 )
 
+                                // 动图：直接保存那段视频（相册/播放器都能播，兼容性最好）
+                                val liveVideoUrlList = currentLiveVideoUrlList()
+                                if (liveVideoUrlList.isNotEmpty()) {
+                                    KLogCat.tagI(
+                                        "HCommentFeedFragment",
+                                        "第 ${index + 1} 张是动图, 保存视频 url=${liveVideoUrlList.first().take(96)}",
+                                    )
+                                    SaveCommentNewLogic.onSaveCommentVideo(
+                                        this@HCommentFeedFragment,
+                                        context,
+                                        liveVideoUrlList,
+                                    )
+                                    return@setOnClickListener
+                                }
+
                                 val urlList = currentImageUrlList()
                                 KLogCat.tagI(
                                     "HCommentFeedFragment",
-                                    "实际保存第 ${index + 1} 张, url=${urlList.firstOrNull()?.take(96)}",
+                                    "实际保存第 ${index + 1} 张静态图, url=${urlList.firstOrNull()?.take(96)}",
                                 )
                                 SaveCommentNewLogic.onSaveCommentImage(
                                     this@HCommentFeedFragment,
