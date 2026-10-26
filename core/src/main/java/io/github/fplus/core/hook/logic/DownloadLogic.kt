@@ -16,6 +16,7 @@ import com.freegang.ktutils.media.KMediaUtils
 import com.freegang.ktutils.net.KHttpUtils
 import com.freegang.ktutils.text.KTextUtils
 import com.ss.android.ugc.aweme.feed.model.Aweme
+import com.ss.ugc.aweme.ImageUrlStruct
 import de.robv.android.xposed.XposedBridge
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
@@ -211,8 +212,23 @@ class DownloadLogic(
                     // 下载逻辑
                     hook.singleLaunchIO(mPureFileName) {
                         val imageFiles = mutableListOf<File>()
-                        var downloadCount = 0 // 下载计数器
+                        var downloadCount = 0 // 下载计数器（按条目，用于完成判定）
                         structList.forEachIndexed { index, urlStruct ->
+                            // 开关打开时，图文动图「图片 + 视频」各存一份
+                            val animatedUrl = if (ConfigV1.get().isLivePhotoVideo)
+                                urlStruct.animatedVideoUrlList().firstOrNull() else null
+                            if (!animatedUrl.isNullOrBlank()) {
+                                XplerLog.d("第 ${index + 1} 张是动图, 同时保存图片+视频")
+                                val pairCount = downloadAnimatedPair(
+                                    index, urlStruct, animatedUrl, it, "$index/${aweme.images.size} %s%%"
+                                ) { f ->
+                                    imageFiles.add(f)
+                                    KMediaUtils.notifyMediaUpdate(context, f.absolutePath)
+                                }
+                                if (pairCount > 0) downloadCount += 1
+                                return@forEachIndexed
+                            }
+
                             val url = urlStruct.urlList.firstOrNull()
                             if (url.isNullOrBlank()) {
                                 // 少数图文条目 urlList 为空，跳过即可；
@@ -238,7 +254,7 @@ class DownloadLogic(
                         hook.refresh {
                             if (downloadCount == aweme.images.size) {
                                 val message =
-                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${downloadCount}个文件!"
+                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${imageFiles.size}个文件!"
                                 it.setFinishedText(message)
                                 hook.showToast(context, message)
                             } else {
@@ -289,8 +305,26 @@ class DownloadLogic(
                 listener = { dismiss, notify ->
                     // 下载逻辑
                     hook.singleLaunchIO(mPureFileName) {
-                        var downloadCount = 0 // 下载计数器
+                        var downloadCount = 0 // 下载计数器（按条目，用于完成判定）
+                        var fileCount = 0 // 实际写入的文件数（动图是图片 + 视频两个）
                         structList.forEachIndexed { index, urlStruct ->
+                            // 同上：开关打开时动图「图片 + 视频」各存一份
+                            val animatedUrl = if (ConfigV1.get().isLivePhotoVideo)
+                                urlStruct.animatedVideoUrlList().firstOrNull() else null
+                            if (!animatedUrl.isNullOrBlank()) {
+                                XplerLog.d("第 ${index + 1} 张是动图, 同时保存图片+视频")
+                                val pairCount = downloadAnimatedPair(
+                                    index, urlStruct, animatedUrl, notify, "$index/${aweme.images.size} %s%%"
+                                ) { f ->
+                                    KMediaUtils.notifyMediaUpdate(context, f.absolutePath)
+                                }
+                                if (pairCount > 0) {
+                                    downloadCount += 1
+                                    fileCount += pairCount
+                                }
+                                return@forEachIndexed
+                            }
+
                             val url = urlStruct.urlList.firstOrNull()
                             if (url.isNullOrBlank()) {
                                 // 同上：空 URL 跳过，避免打断整组图片下载
@@ -307,6 +341,7 @@ class DownloadLogic(
                                 // 同上：VVIC/HEIC 就地转 JPEG
                                 HeifTranscoder.transcodeInPlace(resultFile)
                                 downloadCount += 1
+                                fileCount += 1
                                 KMediaUtils.notifyMediaUpdate(context, resultFile.absolutePath)
                             }
                         }
@@ -315,7 +350,7 @@ class DownloadLogic(
                             dismiss.invoke()
                             if (downloadCount == aweme.images.size) {
                                 val message =
-                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${downloadCount}个文件!"
+                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${fileCount}个文件!"
                                 notify.setFinishedText(message)
                                 hook.showToast(context, message)
                             } else {
@@ -461,6 +496,46 @@ class DownloadLogic(
                 }
             }
         }
+    }
+
+    /**
+     * 动图：图片与视频各存一份（开关 isLivePhotoVideo 打开时走这里）。
+     * 图片会先做 VVIC/HEIC → JPEG 转码。返回成功写入的文件个数（0 = 都没成）。
+     */
+    private suspend fun downloadAnimatedPair(
+        index: Int,
+        urlStruct: ImageUrlStruct,
+        videoUrl: String,
+        notify: IProgressNotification,
+        progressText: String,
+        onFile: (File) -> Unit,
+    ): Int {
+        var fileCount = 0
+
+        downloadFile(
+            url = videoUrl,
+            downloadFile = File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.mp4")),
+            notify = notify,
+            progressText = progressText,
+        )?.let {
+            fileCount += 1
+            onFile(it)
+        }
+
+        urlStruct.urlList.firstOrNull()?.let { imgUrl ->
+            downloadFile(
+                url = imgUrl,
+                downloadFile = File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.jpg")),
+                notify = notify,
+                progressText = progressText,
+            )?.let { f ->
+                HeifTranscoder.transcodeInPlace(f)
+                fileCount += 1
+                onFile(f)
+            }
+        }
+
+        return fileCount
     }
 
     /**

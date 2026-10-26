@@ -35,6 +35,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _notificationDownload = MutableLiveData(false)
     val isNotification: LiveData<Boolean> = _notificationDownload
 
+    private var _isLivePhotoVideo = MutableLiveData(false)
+    val isLivePhotoVideo: LiveData<Boolean> = _isLivePhotoVideo
+
     private var _isCopyLinkDownload = MutableLiveData(false)
     val isCopyDownload: LiveData<Boolean> = _isCopyLinkDownload
 
@@ -190,6 +193,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             changeIsDownload(config.isDownload)
             setOwnerDir(config.ownerDir)
             setNotificationDownload(config.notificationDownload)
+            setLivePhotoVideo(config.isLivePhotoVideo)
             setCopyLinkDownload(config.copyLinkDownload)
             setVideoCoding(config.videoCoding)
             changeIsEmojiDownload(config.isEmojiDownload)
@@ -256,6 +260,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setNotificationDownload(value: Boolean) {
         _notificationDownload.value = value
         config.notificationDownload = value
+    }
+
+    // 实况/动图保存视频
+    fun setLivePhotoVideo(value: Boolean) {
+        _isLivePhotoVideo.value = value
+        config.isLivePhotoVideo = value
     }
 
     // 复制链接时弹出下载

@@ -395,6 +395,13 @@ class FreedomSettingActivity : XplerActivity() {
                         }
                     )
                     CheckBoxItem(
+                        text = "实况/动图保存视频",
+                        checked = model.isLivePhotoVideo.observeAsState(false),
+                        onCheckedChange = {
+                            model.setLivePhotoVideo(it)
+                        }
+                    )
+                    CheckBoxItem(
                         text = "“分享->复制链接”弹出下载",
                         checked = model.isCopyDownload.observeAsState(false),
                         onCheckedChange = {
@@ -453,6 +460,13 @@ class FreedomSettingActivity : XplerActivity() {
                         checked = model.isVibrate.observeAsState(false),
                         onCheckedChange = {
                             model.setVibrate(it)
+                        }
+                    )
+                    CheckBoxItem(
+                        text = "实况/动图保存视频",
+                        checked = model.isLivePhotoVideo.observeAsState(false),
+                        onCheckedChange = {
+                            model.setLivePhotoVideo(it)
                         }
                     )
                 }

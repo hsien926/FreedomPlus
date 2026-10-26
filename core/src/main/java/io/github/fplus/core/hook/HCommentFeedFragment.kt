@@ -12,6 +12,7 @@ import com.freegang.extension.dip2px
 import com.freegang.ktutils.log.KLogCat
 import com.ss.android.ugc.aweme.feed.model.Aweme
 import io.github.fplus.core.base.BaseHook
+import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.hook.logic.SaveCommentNewLogic
 import io.github.fplus.drawable.selectorDrawable
 import io.github.fplus.drawable.shapeDrawable
@@ -20,6 +21,8 @@ import io.github.xpler.core.hookClass
 import io.github.xpler.core.lparam
 
 class HCommentFeedFragment : BaseHook() {
+    private val config get() = ConfigV1.get()
+
     /** 当前这条评论的全部图片（CommentImageStruct；取不到时退回 Aweme.images），顺序与翻页一致 */
     private var imageStructs: List<Any> = emptyList()
 
@@ -173,12 +176,17 @@ class HCommentFeedFragment : BaseHook() {
                                     "点击保存: 图片数=${imageStructs.size}, currentPage=$currentPage",
                                 )
 
-                                // 动图：直接保存那段视频（相册/播放器都能播，兼容性最好）
+                                // 开关打开时：图片与视频各存一份；关闭（默认）只存静态图
                                 val liveVideoUrlList = currentLiveVideoUrlList()
-                                if (liveVideoUrlList.isNotEmpty()) {
+                                if (config.isLivePhotoVideo && liveVideoUrlList.isNotEmpty()) {
                                     KLogCat.tagI(
                                         "HCommentFeedFragment",
-                                        "第 ${index + 1} 张是动图, 保存视频 url=${liveVideoUrlList.first().take(96)}",
+                                        "第 ${index + 1} 张是动图, 同时保存图片+视频",
+                                    )
+                                    SaveCommentNewLogic.onSaveCommentImage(
+                                        this@HCommentFeedFragment,
+                                        context,
+                                        currentImageUrlList(),
                                     )
                                     SaveCommentNewLogic.onSaveCommentVideo(
                                         this@HCommentFeedFragment,
