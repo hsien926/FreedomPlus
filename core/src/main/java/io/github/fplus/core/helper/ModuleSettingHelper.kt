@@ -21,7 +21,15 @@ import io.github.fplus.core.ui.activity.FreedomSettingActivity
 object ModuleSettingHelper {
     private const val MODULE_MAIN_ACTIVITY = "io.github.fplus.activity.MainActivity"
 
+    /** 防抖：一次手势/一次点击只拉起一个设置页（否则会叠两个，返回要按两次） */
+    @Volatile
+    private var lastOpenAt = 0L
+
     fun open(context: Context) {
+        val now = System.currentTimeMillis()
+        if (now - lastOpenAt < 800L) return
+        lastOpenAt = now
+
         val intent = Intent()
         if (ConfigV1.get().isDisablePlugin) {
             if (!KAppUtils.isAppInstalled(context, Constant.modulePackage)) {
