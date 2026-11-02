@@ -12,6 +12,10 @@ enum class FileKind(
     JPG(".jpg"),
     PNG(".png"),
     HEIC(".heic"),
+    // 抖音"动态表情包"实测是 HEVC 编码的 ISO-BMFF 短视频(ftyp 主 brand = msf1,
+    // moov/trak 里是 hvc1 视频轨), 不是 GIF/WebP 动图. 必须给 .mp4 才播得出来,
+    // 否则任何看图工具只能解出首帧.
+    MP4(".mp4"),
     GIF(".gif"),
     WEBP(".webp"),
     ;
@@ -33,6 +37,8 @@ enum class FileKind(
             JPG -> bytes.hexAt(0, 2) == "ffd8" && bytes.hexAt(2, 3) == "ff"
             PNG -> bytes.hexAt(0, 8) == "89504e470d0a1a0a"
             // ISO-BMFF 容器: [4,8) 为 "ftyp", [8,12) 为 brand
+            // msf1 = HEIF image sequence / 抖音动态表情的 HEVC 短视频, 归到 MP4
+            MP4 -> bytes.hexAt(4, 8) == "66747970" && bytes.hexAt(8, 12) == "6d736631"
             HEIC -> bytes.hexAt(4, 8) == "66747970" && bytes.hexAt(8, 12) in HEIF_BRANDS
             // GIF87a / GIF89a; 其后 6 字节是逻辑屏幕描述符(宽高/调色板均可能不同), 不参与比较
             GIF -> bytes.hexAt(0, 6) == "474946383761" || bytes.hexAt(0, 6) == "474946383961"
@@ -51,7 +57,7 @@ enum class FileKind(
             "68657663", // hevc
             "68657678", // hevx
             "6d696631", // mif1
-            "6d736631", // msf1
+            // 注意: 不要收 msf1 —— 那是 HEIF image sequence / 动态表情视频, 归 MP4
         )
     }
 }

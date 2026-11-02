@@ -33,7 +33,11 @@ class SaveEmojiLogic(
     }
 
     private fun onSaveEmoji(urlList: List<String>) {
-        val url = urlList.first()
+        // 同一个表情可能下发多个地址(HEVC/HEIF 变体与 GIF/WebP 直链混在一起),
+        // 优先挑路径上写着 gif / webp 的那条; 都没有时退回第一条, 与旧行为一致.
+        val url = urlList.firstOrNull { it.knownEmojiExtension() == ".gif" }
+            ?: urlList.firstOrNull { it.knownEmojiExtension() == ".webp" }
+            ?: urlList.first()
         hook.singleLaunchIO(url) {
             // 默认保存路径: `/外置存储器/Download/Freedom/emoji`
             val parentPath = ConfigV1.getFreedomDir(context).child("emoji").need()
@@ -46,6 +50,7 @@ class SaveEmojiLogic(
                 file = File(parentPath, "${System.currentTimeMillis()}${url.guessEmojiSuffix()}"),
             )
             if (resultFile != null) {
+                logEmojiResult(urlList, resultFile)
                 hook.showToast(context, "保存成功!")
                 KMediaUtils.notifyMediaUpdate(context, resultFile.absolutePath)
                 if (config.vibrate) hook.vibrate(context, 5L)
@@ -56,16 +61,62 @@ class SaveEmojiLogic(
     }
 
     /**
-     * 从 URL 路径推测文件后缀, 仅作为落盘占位名.
-     * 真实类型仍由 KHttpUtils.download 读文件头决定, 这里只是让嗅探失败时也能有个合理后缀.
+     * 打印表情落盘的真实情况, 用于定位"动图存成静态首帧"类问题:
+     * 需要同时看到源 URL 形态(是否被 CDN 模板改写)与文件头真实容器类型.
+     * 只打印 host + path, 不打印 query, 避免把 x-signature/x-expires 写进日志。
      */
-    private fun String.guessEmojiSuffix(): String {
-        // 只取路径最后一段的扩展名, 避免把域名里的 ".com/obj/xxx" 当成后缀
+    private fun logEmojiResult(urlList: List<String>, file: File) {
+        val urls = urlList.joinToString(" | ") { it.logSafeUrl() }
+        val head = file.headHex()
+        val animatedWebp = file.hasWebpAnimation()
+        XplerLog.d(
+            "表情保存: urls=[$urls]",
+            "表情保存: file=${file.name} size=${file.length()} head=$head animatedWebp=$animatedWebp",
+        )
+    }
+
+    /**
+     * 从 URL 路径里识别图片扩展名(带点), 识别不出返回 null.
+     * 只取路径最后一段, 避免把域名里的 ".com/obj/xxx" 当成后缀.
+     */
+    private fun String.knownEmojiExtension(): String? {
         val name = substringBefore('?').substringBefore('#').substringAfterLast('/')
         val ext = name.substringAfterLast('.', "").lowercase()
         return when (ext) {
-            "gif", "webp", "png", "jpg", "jpeg", "heic" -> ".$ext"
-            else -> ".webp"
+            "gif", "webp", "png", "jpg", "jpeg", "heic", "mp4" -> ".$ext"
+            else -> null
         }
     }
+
+    /**
+     * 落盘占位后缀. 真实类型仍由 KHttpUtils.download 读文件头决定,
+     * 这里只是让嗅探失败时也能有个合理后缀.
+     */
+    private fun String.guessEmojiSuffix(): String = knownEmojiExtension() ?: ".webp"
 }
+
+/** 日志用: 只保留 host + path, 去掉带签名的 query */
+private fun String.logSafeUrl(): String = runCatching {
+    val uri = java.net.URI(this)
+    "${uri.host}${uri.path}"
+}.getOrDefault("<unparsable-url>")
+
+/** 读取文件头十六进制, 用于确认落盘的真实容器类型 */
+private fun File.headHex(limit: Int = 16): String = runCatching {
+    inputStream().use { input ->
+        val buffer = ByteArray(limit)
+        val count = input.read(buffer)
+        if (count <= 0) "" else buffer.copyOf(count).joinToString("") { "%02x".format(it.toInt() and 0xFF) }
+    }
+}.getOrDefault("")
+
+/** 粗略判断 WebP 里是否存在动画块(ANIM/ANMF), 用于区分"动图 webp"与"静态首帧 webp" */
+private fun File.hasWebpAnimation(): Boolean = runCatching {
+    inputStream().use { input ->
+        val buffer = ByteArray(64 * 1024)
+        val count = input.read(buffer)
+        if (count <= 0) return@use false
+        val text = String(buffer, 0, count, Charsets.ISO_8859_1)
+        text.contains("ANIM") || text.contains("ANMF")
+    }
+}.getOrDefault(false)
