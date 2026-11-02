@@ -3,6 +3,7 @@
 > 抖音去广告与功能增强的 Xposed / LSPosed 模块，开源、无广告、不联网上传任何数据。
 
 [![GitHub release](https://img.shields.io/github/v/release/hsien926/FreedomPlus?display_name=release)](https://github.com/hsien926/FreedomPlus/releases)
+[![Build](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml/badge.svg)](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B%20(API%2024%2B)-green)]()
 

@@ -6,15 +6,67 @@ import java.io.InputStream
 import java.nio.charset.Charset
 
 enum class FileKind(
-    val headHex: String,
     val suffix: String,
 ) {
     // image
-    JPG("ffd8ffe000104a4649460001", ".jpg"),
-    PNG("89504e470d0a1a0a0000000d", ".png"),
-    HEIC("0000001C6674797068656963", ".heic"),
-    GIF("47494638376132013a01f700", ".gif"),
-    WEBP("52494646ea33000057454250", ".webp"),
+    JPG(".jpg"),
+    PNG(".png"),
+    HEIC(".heic"),
+    GIF(".gif"),
+    WEBP(".webp"),
+    ;
+
+    /**
+     * 判断文件头是否属于该类型。
+     *
+     * 关键点: 只比对格式定义里**固定不变**的字段。早期实现把整段文件头写成常量
+     * (如 GIF 带上了逻辑屏幕宽高、WEBP 带上了 RIFF 块长度), 那些字节随文件变化,
+     * 导致除了当初取样那个文件之外永远匹配不上 —— 动图因此一直沿用调用方给的
+     * 默认后缀, 被相册/微信按静态图片解码, 只剩首帧。
+     *
+     * @param bytes 文件头字节, 至少 12 字节
+     */
+    fun matches(bytes: ByteArray): Boolean {
+        if (bytes.size < 12) return false
+        return when (this) {
+            // SOI(FFD8) + 段标记起始(FF): APP0(JFIF) / APP1(EXIF) 等均适用
+            JPG -> bytes.hexAt(0, 2) == "ffd8" && bytes.hexAt(2, 3) == "ff"
+            PNG -> bytes.hexAt(0, 8) == "89504e470d0a1a0a"
+            // ISO-BMFF 容器: [4,8) 为 "ftyp", [8,12) 为 brand
+            HEIC -> bytes.hexAt(4, 8) == "66747970" && bytes.hexAt(8, 12) in HEIF_BRANDS
+            // GIF87a / GIF89a; 其后 6 字节是逻辑屏幕描述符(宽高/调色板均可能不同), 不参与比较
+            GIF -> bytes.hexAt(0, 6) == "474946383761" || bytes.hexAt(0, 6) == "474946383961"
+            // RIFF + 4 字节块长度(随文件大小变化) + WEBP
+            WEBP -> bytes.hexAt(0, 4) == "52494646" && bytes.hexAt(8, 12) == "57454250"
+        }
+    }
+
+    companion object {
+        /** HEIF 常见 brand. 刻意不含 MP4 的 isom/mp42/mp41, 避免视频被误判成图片. */
+        private val HEIF_BRANDS = setOf(
+            "68656963", // heic
+            "68656978", // heix
+            "6865696d", // heim
+            "68656973", // heis
+            "68657663", // hevc
+            "68657678", // hevx
+            "6d696631", // mif1
+            "6d736631", // msf1
+        )
+    }
+}
+
+private const val HEX_DIGITS = "0123456789abcdef"
+
+/** 取 [from, to) 区间字节的小写十六进制串, 越界返回空串 */
+private fun ByteArray.hexAt(from: Int, to: Int): String {
+    if (from < 0 || to > size || from >= to) return ""
+    val builder = StringBuilder((to - from) * 2)
+    for (index in from until to) {
+        val value = this[index].toInt() and 0xFF
+        builder.append(HEX_DIGITS[value ushr 4]).append(HEX_DIGITS[value and 0x0F])
+    }
+    return builder.toString()
 }
 
 object KFileUtils {
@@ -25,8 +77,7 @@ object KFileUtils {
      */
     @JvmStatic
     fun getFileKind(bytes: ByteArray): FileKind? {
-        val headHex = bytes.joinToString("") { String.format("%02x", it) }
-        return FileKind.values().firstOrNull { headHex.startsWith(it.headHex, true) }
+        return FileKind.values().firstOrNull { it.matches(bytes) }
     }
 
     /**
