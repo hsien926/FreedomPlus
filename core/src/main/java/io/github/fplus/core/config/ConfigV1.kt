@@ -125,6 +125,21 @@ class ConfigV1 private constructor() {
             field = value
         }
 
+    /// 下载动图格式（跟随源 / GIF / MP4），存的是 `EmojiAnimateFormat.label`
+    var emojiAnimateFormat: String = EmojiAnimateFormat.SOURCE.label
+        get() {
+            field = mmkv.getString(
+                "emojiAnimateFormat",
+                EmojiAnimateFormat.SOURCE.label
+            ) ?: EmojiAnimateFormat.SOURCE.label
+            return field
+        }
+        set(value) {
+            val normalized = EmojiAnimateFormat.fromLabel(value).label
+            mmkv.putString("emojiAnimateFormat", normalized)
+            field = normalized
+        }
+
     /// 首页控件半透明
     var isTranslucent: Boolean = false
         get() {

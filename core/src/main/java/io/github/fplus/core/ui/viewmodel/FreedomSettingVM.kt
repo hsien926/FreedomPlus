@@ -13,6 +13,7 @@ import com.freegang.extension.readAssetsAsText
 import com.freegang.ktutils.app.KAppUtils
 import com.freegang.ktutils.net.KUrlUtils
 import io.github.fplus.core.config.ConfigV1
+import io.github.fplus.core.config.EmojiAnimateFormat
 import io.github.webdav.WebDav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -46,6 +47,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
 
     private var _vibrate = MutableLiveData(false)
     val isVibrate: LiveData<Boolean> = _vibrate
+
+    private var _emojiAnimateFormat = MutableLiveData(EmojiAnimateFormat.SOURCE.label)
+    val emojiAnimateFormat: LiveData<String> = _emojiAnimateFormat
 
     private var _isTranslucent = MutableLiveData(false)
     val isTranslucent: LiveData<Boolean> = _isTranslucent
@@ -191,6 +195,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setVideoCoding(config.videoCoding)
             changeIsEmojiDownload(config.isEmojiDownload)
             setVibrate(config.vibrate)
+            setEmojiAnimateFormat(config.emojiAnimateFormat)
             changeIsTranslucent(config.isTranslucent)
             setTranslucentValue(config.translucentValue)
             changeIsRemoveSticker(config.isRemoveSticker)
@@ -276,6 +281,13 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setVibrate(value: Boolean) {
         _vibrate.value = value
         config.vibrate = value
+    }
+
+    // 下载动图格式（跟随源 / GIF / MP4）
+    fun setEmojiAnimateFormat(value: String) {
+        val normalized = EmojiAnimateFormat.fromLabel(value).label
+        _emojiAnimateFormat.value = normalized
+        config.emojiAnimateFormat = normalized
     }
 
     // 首页控件半透明

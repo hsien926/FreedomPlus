@@ -67,6 +67,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import com.freegang.extension.findMethodInvoke
 import com.freegang.ktutils.app.KToastUtils
+import io.github.fplus.core.config.EmojiAnimateFormat
 import io.github.fplus.core.helper.DexkitBuilder
 import io.github.fplus.core.helper.HighlightStyleBuilder
 import io.github.fplus.core.ui.ModuleTheme
@@ -447,6 +448,17 @@ class FreedomSettingActivity : XplerActivity() {
                 }
             ) {
                 Column {
+                    val emojiFormat by model.emojiAnimateFormat
+                        .observeAsState(EmojiAnimateFormat.SOURCE.label)
+                    ExposedDropdownItem(
+                        text = "下载动图格式",
+                        value = emojiFormat,
+                        menus = EmojiAnimateFormat.labels,
+                        onSelected = {
+                            model.setEmojiAnimateFormat(it)
+                        }
+                    )
+                    Divider()
                     CheckBoxItem(
                         text = "震动反馈",
                         checked = model.isVibrate.observeAsState(false),
