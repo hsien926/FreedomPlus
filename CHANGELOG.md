@@ -7,6 +7,19 @@
 
 ---
 
+## 未发布
+
+### 新增
+
+- 设置 →「保存表情包/评论视频、图片」→「相关设置」新增「下载动图格式」（跟随源 / GIF / MP4，默认跟随源）。该项只描述期望格式：按素材真实容器落盘，期望与素材不一致时弹说明，本期不做 GIF/MP4 互转。
+
+### 修复
+
+- **设置页重建偶发闪退（`BadParcelableException: ClassNotFoundException androidx.compose.material.DrawerValue`）**：模块设置页跑在抖音进程内，Host 的 `savedInstanceState` 用了抖音（或其插件）的 ClassLoader；Compose 的 `rememberSaveable`（`Scaffold` 默认 `DrawerState`）把模块内的 compose 枚举按 Serializable 写进该 Bundle，重建时宿主 ClassLoader 解析不到，直接抛异常。现在 `BaseActivity.onCreate` 先把 Bundle 的 ClassLoader 换成 `PluginClassloader`（模块优先、宿主兜底）再恢复状态。
+- **HEIF 图像序列被误命名为 `.mp4`**：抖音部分动图表情下发 `ftyp=msf1` + `hdlr=pict`（`HEIF/ImageSequence`），按旧的 `msf1 → .mp4` 规则命名后任何播放器都打不开。现按 `moov/mdia/hdlr` 细分：`vide` 仍为 `.mp4`，`pict` 修正为 `.heic` 并提示「相册可能仅显示首帧」。
+
+---
+
 ## v1.3.9
 
 ### 修复
