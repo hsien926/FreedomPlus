@@ -22,13 +22,26 @@ class SaveEmojiLogic(
 
         /** HEIF 图像序列的 handler_type，见 [IsoBmffProbe] */
         private const val HANDLER_PICT = "pict"
+
+        private const val SUFFIX_MP4 = "mp4"
+        private const val SUFFIX_HEIC = "heic"
+        private const val SUFFIX_GIF = "gif"
     }
 
-    /** 探测 + 可能的改名结果 */
-    private data class RefinedFile(
+    /**
+     * 一次探测 + 一次改名后的结果，提示文案也从它派生，避免"先降 heic 再解释冲突"两段式互相打架。
+     *
+     * @param handlerType `moov/mdia/hdlr`，探测失败/非 ISO-BMFF 为 null
+     * @param pictureSequence 是否 HEIF 图像序列（`hdlr=pict`）
+     * @param renamed 是否实际发生过改名
+     * @param renameFailed 需要改名但失败了（文件保持原后缀）
+     */
+    private data class Resolution(
         val file: File,
         val handlerType: String?,
-        val note: String?,
+        val pictureSequence: Boolean,
+        val renamed: Boolean,
+        val renameFailed: Boolean,
     )
 
     init {
@@ -65,62 +78,75 @@ class SaveEmojiLogic(
                 return@singleLaunchIO
             }
 
-            // 按 `moov/mdia/hdlr` 细分 ISO-BMFF：msf1 + pict 是 HEIF 图像序列, 不是可播视频
-            val refined = refineContainer(resultFile)
-            logEmojiResult(urlList, refined)
+            val format = EmojiAnimateFormat.fromLabel(config.emojiAnimateFormat)
+            val resolution = resolve(resultFile, format)
+            logEmojiResult(urlList, resolution, format)
 
-            val hint = conflictHint(refined.file) ?: refined.note
+            val hint = hintFor(resolution, format)
             hook.showToast(context, hint ?: "保存成功!")
-            KMediaUtils.notifyMediaUpdate(context, refined.file.absolutePath)
+            KMediaUtils.notifyMediaUpdate(context, resolution.file.absolutePath)
             if (config.vibrate) hook.vibrate(context, 5L)
         }
     }
 
     /**
-     * 修正"看起来是视频、实际是图片序列"的容器：
-     * `ftyp=msf1` + `hdlr=pict` 时 KHttpUtils 已把它命名成 `.mp4`, 但任何播放器都打不开,
-     * 这里改名为 `.heic` 并给出提示（不改内容, 一期不做转码）。
+     * 按「用户选项 × 真实容器」一次性算出目标后缀，最多改名一次。
+     *
+     * - `hdlr=pict`（HEIF 图像序列）且选 MP4：沿用旧版命名策略，存 `.mp4`（不转码，
+     *   个别播放器可能只显示首帧，但系统相册/多数播放器可当视频播）；
+     * - `hdlr=pict` 且选跟随源 / GIF：降级为 `.heic`；
+     * - 其它素材维持 KHttpUtils 嗅探出的真实后缀。
      */
-    private fun refineContainer(file: File): RefinedFile {
+    private fun resolve(file: File, format: EmojiAnimateFormat): Resolution {
         val handlerType = runCatching { IsoBmffProbe.handlerType(file) }.getOrNull()
-        if (handlerType != HANDLER_PICT) {
-            return RefinedFile(file, handlerType, null)
+        val pictureSequence = handlerType == HANDLER_PICT
+        if (!pictureSequence) {
+            return Resolution(file, handlerType, false, renamed = false, renameFailed = false)
         }
 
-        val note = "该表情为 HEIF 图像序列, 相册可能仅显示首帧"
-        if (file.extension.equals("heic", ignoreCase = true)) {
-            return RefinedFile(file, handlerType, note)
+        val targetSuffix = if (format == EmojiAnimateFormat.MP4) SUFFIX_MP4 else SUFFIX_HEIC
+        if (file.extension.equals(targetSuffix, ignoreCase = true)) {
+            return Resolution(file, handlerType, true, renamed = false, renameFailed = false)
         }
 
-        val target = File(file.parentFile, "${file.nameWithoutExtension}.heic")
+        val target = File(file.parentFile, "${file.nameWithoutExtension}.$targetSuffix")
         val renamed = runCatching { file.renameTo(target) }.getOrDefault(false)
         return if (renamed) {
-            XplerLog.d("表情保存: 容器修正 ${file.name} -> ${target.name} (handler=$handlerType)")
-            RefinedFile(target, handlerType, note)
+            XplerLog.d("表情保存: 容器修正 ${file.name} -> ${target.name} (format=${format.label}, handler=$handlerType)")
+            Resolution(target, handlerType, true, renamed = true, renameFailed = false)
         } else {
-            XplerLog.d("表情保存: 容器修正失败, 保留 ${file.name} (handler=$handlerType)")
-            RefinedFile(file, handlerType, "$note (重命名失败, 已按 .${file.extension} 保存)")
+            XplerLog.d("表情保存: 容器修正失败, 保留 ${file.name} (format=${format.label}, handler=$handlerType)")
+            Resolution(file, handlerType, true, renamed = false, renameFailed = true)
         }
     }
 
     /**
-     * 用户期望格式与真实容器不一致时的提示（一期不转码, 按源保存）。
-     * 期望达成或选择"跟随源"时返回 null。
+     * 用户期望格式与真实容器不一致时的提示（一期不转码，按源保存）。
+     * 期望已达成且无需说明时返回 null（调用方回落到"保存成功!"）。
      */
-    private fun conflictHint(file: File): String? {
-        val suffix = file.extension.lowercase()
-        return when (EmojiAnimateFormat.fromLabel(config.emojiAnimateFormat)) {
-            EmojiAnimateFormat.SOURCE -> null
-            EmojiAnimateFormat.GIF -> if (suffix == "gif") {
+    private fun hintFor(resolution: Resolution, format: EmojiAnimateFormat): String? {
+        val suffix = resolution.file.extension.lowercase()
+        return when (format) {
+            EmojiAnimateFormat.SOURCE -> when {
+                !resolution.pictureSequence -> null
+                resolution.renameFailed -> "该表情为 HEIF 图像序列, 改名 .$SUFFIX_HEIC 失败, 已保留 .$suffix"
+                else -> "该表情为 HEIF 图像序列, 相册可能仅显示首帧"
+            }
+
+            EmojiAnimateFormat.GIF -> if (suffix == SUFFIX_GIF) {
                 null
             } else {
                 "该表情源为 ${sourceLabel(suffix)}, 已按源保存, 暂不支持转 GIF"
             }
 
-            EmojiAnimateFormat.MP4 -> if (suffix == "mp4") {
-                null
-            } else {
-                "该表情源为 ${sourceLabel(suffix)}, 已按源保存, 暂不支持转 MP4"
+            EmojiAnimateFormat.MP4 -> when {
+                // 选 MP4 且已经拿到 .mp4：pict 情况给一句兼容性说明，其余视为完全成功
+                suffix == SUFFIX_MP4 && resolution.pictureSequence ->
+                    "已按 MP4 保存（HEIF 图像序列, 个别播放器可能仅显示首帧）"
+
+                suffix == SUFFIX_MP4 -> null
+                resolution.renameFailed -> "该表情为 HEIF 图像序列, 改名 .$SUFFIX_MP4 失败, 已保留 .$suffix"
+                else -> "该表情源为 ${sourceLabel(suffix)}, 已按源保存, 暂不支持转 MP4"
             }
         }
     }
@@ -138,16 +164,20 @@ class SaveEmojiLogic(
      * 需要同时看到源 URL 形态(是否被 CDN 模板改写)、文件头真实容器类型与 ISO-BMFF handler。
      * 只打印 host + path, 不打印 query, 避免把 x-signature/x-expires 写进日志。
      */
-    private fun logEmojiResult(urlList: List<String>, refined: RefinedFile) {
-        val file = refined.file
+    private fun logEmojiResult(
+        urlList: List<String>,
+        resolution: Resolution,
+        format: EmojiAnimateFormat,
+    ) {
+        val file = resolution.file
         val urls = urlList.joinToString(" | ") { it.logSafeUrl() }
         val head = file.headHex()
         val animatedWebp = file.hasWebpAnimation()
         XplerLog.d(
             "表情保存: urls=[$urls]",
             "表情保存: file=${file.name} size=${file.length()} head=$head" +
-                    " animatedWebp=$animatedWebp handler=${refined.handlerType ?: "-"}" +
-                    " format=${EmojiAnimateFormat.fromLabel(config.emojiAnimateFormat).label}",
+                    " animatedWebp=$animatedWebp handler=${resolution.handlerType ?: "-"}" +
+                    " format=${format.label} renamed=${resolution.renamed}",
         )
     }
 

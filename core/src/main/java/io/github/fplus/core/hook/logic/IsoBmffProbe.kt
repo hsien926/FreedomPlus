@@ -9,7 +9,9 @@ import java.io.RandomAccessFile
  * 抖音的动图素材存在两种容器形态，仅凭 `ftyp` brand 无法区分：
  * - `ftyp` = `msf1` + `moov/mdia/hdlr` = `vide` → HEVC 短视频，改名 `.mp4` 可播；
  * - `ftyp` = `msf1` + `moov/mdia/hdlr` = `pict` → HEIF 图像序列
- *   （handler name `HEIF/ImageSequence/PictureHandler`），改名 `.mp4` 任何播放器都打不开。
+ *   （handler name `HEIF/ImageSequence/PictureHandler`）：轨道本身仍是完整 `hvc1` HEVC，
+ *   系统相册与部分播放器能当视频播，但也有播放器（如 PotPlayer）只认 `vide` 而打不开。
+ *   因此调用方在用户**显式选 MP4** 时仍沿用旧版命名策略（`.mp4`），选「跟随源」才降级 `.heic`。
  *
  * 实现上用 [RandomAccessFile] 顺序读顶层 box 头、遇 `mdat` 直接 `seek` 跳过，
  * 读取量只与 `moov` 大小相关，与文件体积无关（动图几 MB 也不会整读进内存）。

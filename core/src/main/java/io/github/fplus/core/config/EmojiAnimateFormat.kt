@@ -17,7 +17,12 @@ enum class EmojiAnimateFormat(val label: String) {
     /** 期望 GIF */
     GIF("GIF"),
 
-    /** 期望 MP4（抖音部分动图表情下发的是 HEVC 短视频，落盘即 .mp4） */
+    /**
+     * 期望 MP4：抖音部分动图表情下发的是 HEVC 素材（`ftyp=msf1`），直接命名为 `.mp4`。
+     *
+     * 含 `hdlr=pict` 的 HEIF 图像序列也一样命名 `.mp4`（沿用旧版行为，与「跟随源」降级 `.heic` 相区分）；
+     * 本模块一期不做转码，个别播放器对 `pict` 容器可能只显示首帧。
+     */
     MP4("MP4"),
     ;
 

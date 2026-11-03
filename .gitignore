@@ -36,3 +36,4 @@ smali/
 # AI 助手与本地工具缓存（本地工作区用，不属于工程）
 .codebuddy/
 .serena/
+work/
