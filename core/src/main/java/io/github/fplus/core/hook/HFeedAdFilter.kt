@@ -4,10 +4,9 @@ import com.freegang.ktutils.log.KLogCat
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.helper.DexkitBuilder
+import io.github.fplus.core.hook.logic.FeedAdListLogic
 import io.github.xpler.core.entity.NoneHook
 import io.github.xpler.core.proxy.MethodParam
-import java.lang.reflect.Field
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 信息流广告过滤（数据层实现，39.9.0 / 40.6.0 通用）
@@ -56,8 +55,9 @@ import java.util.concurrent.ConcurrentHashMap
  * - notify 仍由抖音自己发，`mExpectedAdapterCount` 与 `getCount()` 永远同步。
  *
  * 只有走 `LJJLIL(int,int,List)` / `LJJLJ(int,Aweme)`（带插入位置/条数的接口）进来的广告项
- * 不在这里处理：改它们的入参会把抖音的索引算错。那部分由 [HFeedAdBlock]
- * （`VideoViewHolder.bind` 前置拦截）兜底成空白页 —— 不动 count，不会再引发崩溃。
+ * 不在这里处理：改它们的入参会把抖音的索引算错。那部分由 [HFeedAdNotifySweep]
+ * 在宿主 `notifyDataSetChanged()` 之前按引用剔除 —— 清理与 notify 同帧完成，
+ * `dataSetChanged()` 读到的就是清理后的 count，不会触发 PagerAdapter 断言。
  */
 class HFeedAdFilter : BaseHook() {
     companion object {
@@ -65,12 +65,6 @@ class HFeedAdFilter : BaseHook() {
 
         private var removedTotal = 0
         private var lastLoggedSize = -1
-
-        /** `Aweme.isAd` 字段缓存：getField 每次都要遍历，feed 每页几十项时值得缓存 */
-        private val adFieldCache = ConcurrentHashMap<Class<*>, Field>()
-
-        /** 明确没有 isAd 字段的类，避免每项都白跑一次 getField */
-        private val noAdField = java.util.Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
     }
 
     private val config get() = ConfigV1.get()
@@ -119,7 +113,7 @@ class HFeedAdFilter : BaseHook() {
         if (src.isEmpty()) return
 
         val total = src.size
-        val kept = src.filterNot { isAdAweme(it) }
+        val kept = src.filterNot { FeedAdListLogic.isAdAweme(it) }
         val removed = total - kept.size
 
         if (removed <= 0) {
@@ -130,12 +124,12 @@ class HFeedAdFilter : BaseHook() {
             return
         }
 
-        val ads = src.filter { isAdAweme(it) }
+        val ads = src.filter { FeedAdListLogic.isAdAweme(it) }
 
         // 1) 过滤入参本身：优先原地改（保留实例），不可变列表退化为替换参数
         val mutated = runCatching {
             val mutable = src as MutableList<Any?>
-            mutable.retainAll { !isAdAweme(it) }
+            mutable.retainAll { !FeedAdListLogic.isAdAweme(it) }
             mutable.size == kept.size
         }.getOrDefault(false)
 
@@ -164,54 +158,15 @@ class HFeedAdFilter : BaseHook() {
 
     /**
      * 遍历适配器实例（含父类）所有 `List` 类型字段，凡「确实含有我们刚剔除的那几个广告对象」
-     * （用引用相等判定）的列表，一并剔除。用产地校验避免误伤无关列表。
+     * （用引用相等判定）的列表，一并按引用剔除。用产地校验避免误伤无关列表。
      */
-    @Suppress("UNCHECKED_CAST")
     private fun scrubParallelLists(adapter: Any, ads: List<Any?>) {
-        var cls: Class<*>? = adapter.javaClass
-        while (cls != null && cls != Any::class.java) {
-            for (field in cls.declaredFields) {
-                if (java.lang.reflect.Modifier.isStatic(field.modifiers)) continue
-                if (!List::class.java.isAssignableFrom(field.type)) continue
+        for (value in FeedAdListLogic.collectListFields(adapter)) {
+            if (value.isEmpty()) continue
+            if (!FeedAdListLogic.ownsAny(value, ads)) continue
 
-                val value = runCatching {
-                    field.isAccessible = true
-                    field.get(adapter)
-                }.getOrNull() as? MutableList<Any?> ?: continue
-
-                if (value.isEmpty()) continue
-                val ownsAd = ads.any { ad -> value.any { it === ad } }
-                if (!ownsAd) continue
-
-                runCatching { value.retainAll { !isAdAweme(it) } }
-                    .onFailure { KLogCat.tagI(TAG, "平行列表剔除失败: ${it.message}") }
-            }
-            cls = cls.superclass
+            runCatching { FeedAdListLogic.removeByIdentity(value, ads) }
+                .onFailure { KLogCat.tagI(TAG, "平行列表剔除失败: ${it.message}") }
         }
-    }
-
-    /**
-     * 是否广告项。依据 `Aweme.isAd`（Gson 名 `is_ads`，public 字段）。
-     * 读不到就按非广告处理 —— 宁可放过，不可误杀，更不能因为读失败去改 count。
-     */
-    private fun isAdAweme(item: Any?): Boolean {
-        if (item == null) return false
-        val cls = item.javaClass
-        if (noAdField.contains(cls)) return false
-
-        val cached = adFieldCache[cls]
-        val field = if (cached != null) {
-            cached
-        } else {
-            val found = runCatching { cls.getField("isAd").apply { isAccessible = true } }.getOrNull()
-            if (found == null) {
-                noAdField.add(cls)
-                return false
-            }
-            adFieldCache[cls] = found
-            found
-        }
-
-        return runCatching { field.getBoolean(item) }.getOrDefault(false)
     }
 }

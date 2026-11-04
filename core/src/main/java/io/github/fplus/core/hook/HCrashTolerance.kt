@@ -16,6 +16,52 @@ import io.github.xpler.core.proxy.MethodParam
 class HCrashTolerance {
     companion object {
         const val TAG = "HCrashTolerance"
+
+        /** 暂停链路的动画组件（抖音 31.7.1 实测类名，未被混淆） */
+        internal const val FEED_WIDGET_ANIM =
+            "com.ss.android.ugc.aweme.feed.plato.business.contentconsumption.widget.FeedWidgetAnimComponent"
+
+        /** 暂停链路的根组件，作为类名漂移时的第二道网 */
+        internal const val FEED_COMPONENTS_ROOT =
+            "com.ss.android.ugc.aweme.feed.plato.core.FeedComponentsRoot"
+
+        private var pauseNpeSwallowed = 0
+        private var pauseNpeLastLogAt = 0L
+
+        /**
+         * 定向吞掉「暂停链路里 FeedItemFragmentVM 为空」的 NPE。
+         *
+         * 特征（抖音 31.7.1 实测）：
+         * ```
+         * NullPointerException: Attempt to invoke virtual method
+         *   'QLiveData FeedItemFragmentVM.getFeedAnimation()' on a null object reference
+         * at VideoViewHolder.LJIILIIL
+         * at FeedWidgetAnimComponent.handlePauseP
+         * ```
+         * 触发路径是「点侧边栏切 tab」→ StateManager.onNodeShow 写状态 LiveData →
+         * 观察者调 handlePauseP → 当前页 ViewHolder 的 VM 尚未初始化。
+         *
+         * 只认 `NullPointerException` + message 关键字，别的异常一律照抛，避免掩盖真实问题。
+         */
+        internal fun swallowPauseNpe(params: MethodParam, from: String): Boolean {
+            val throwable = params.throwable ?: return false
+            if (throwable !is NullPointerException) return false
+
+            val message = throwable.message ?: return false
+            if (!message.contains("getFeedAnimation") && !message.contains("FeedItemFragmentVM")) {
+                return false
+            }
+
+            params.setThrowable(null)
+            pauseNpeSwallowed++
+
+            // 限速：切 tab 时可能连续触发多次，避免刷日志
+            val now = System.currentTimeMillis()
+            if (now - pauseNpeLastLogAt < 1000L) return true
+            pauseNpeLastLogAt = now
+            KLogCat.tagI(TAG, "已拦截暂停链路 NPE 第${pauseNpeSwallowed}次(来自$from): $message")
+            return true
+        }
     }
 
     val config get() = ConfigV1.get()
@@ -25,6 +71,8 @@ class HCrashTolerance {
         HLivePhoto()
         HTabLanding()
         HFeedPagerPopulate()
+        HFeedPauseNpe()
+        HFeedPauseNpeRoot()
     }
 
     inner class HPoiFeed : BaseHook(), CallMethods {
@@ -160,6 +208,42 @@ class HCrashTolerance {
                     adapter.javaClass.getMethod("notifyDataSetChanged").invoke(adapter)
                 }.onFailure { XplerLog.e(it) }
             }
+        }
+    }
+
+    /**
+     * 【崩溃容错】`FeedWidgetAnimComponent.handlePauseP` 抛出
+     * `FeedItemFragmentVM.getFeedAnimation()` 的 NPE。
+     *
+     * 成因见 [swallowPauseNpe] 的注释：该 ViewHolder 的 VM 为空，暂停时被判空指针。
+     * 根因已从数据层处理（广告不再进入 Adapter，`bind` 正常执行、VM 正常创建），
+     * 这里只是最后一道网，覆盖宿主自身或其它模块造成的同款异常 —— 不吞则整个进程被
+     * `KAppCrashUtils` 结束（表现为「抖音异常退出!」）。
+     */
+    inner class HFeedPauseNpe : BaseHook() {
+        override fun setTargetClass(): Class<*> {
+            return findClass(FEED_WIDGET_ANIM)
+        }
+
+        @OnAfter("handlePauseP")
+        fun handlePauseAfter(params: MethodParam) {
+            swallowPauseNpe(params, "FeedWidgetAnimComponent")
+        }
+    }
+
+    /**
+     * 同上，目标换成 `FeedComponentsRoot.handlePauseP`：
+     * 组件类名若在后续版本漂移，[HFeedPauseNpe] 会静默失效，
+     * 由这一层在异常冒泡到根组件时兜住。
+     */
+    inner class HFeedPauseNpeRoot : BaseHook() {
+        override fun setTargetClass(): Class<*> {
+            return findClass(FEED_COMPONENTS_ROOT)
+        }
+
+        @OnAfter("handlePauseP")
+        fun handlePauseAfter(params: MethodParam) {
+            swallowPauseNpe(params, "FeedComponentsRoot")
         }
     }
 }

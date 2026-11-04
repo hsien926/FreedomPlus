@@ -35,7 +35,8 @@ class HFeedBindProbe : BaseHook() {
          * 诊断开关，默认关闭。
          *
          * 已完成使命：真机确认 `VideoViewHolder` 的 `bind` / `getAweme` / `onViewHolderSelected`
-         * 都会被主 feed 调用，据此另建了 `HFeedAdBlock` 做实际拦截。留此探针便于日后排查。
+         * 都会被主 feed 调用。广告拦截后来改到数据层（`HFeedAdFilter` / `HFeedAdNotifySweep`），
+         * 不再在 bind 上做拦截。留此探针便于日后排查。
          */
         @Volatile
         var enabled: Boolean = false
