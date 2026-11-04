@@ -107,6 +107,8 @@ class DouYinMain(private val app: Application) {
                     HChatListRecalledHint()
                     // Feed list sanitizing (whole-table path only, depends on DexKit abstractFeedAdapterClazz)
                     HFeedAdFilter()
+                    // Feed source filtering (runs inside the response callback, before the adapter)
+                    HFeedSourceFilter()
                     // 主 feed 数据流探针（诊断，默认关闭）
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
