@@ -216,9 +216,9 @@ class HCrashTolerance {
      * `FeedItemFragmentVM.getFeedAnimation()` 的 NPE。
      *
      * 成因见 [swallowPauseNpe] 的注释：该 ViewHolder 的 VM 为空，暂停时被判空指针。
-     * 根因已从数据层处理（广告不再进入 Adapter，`bind` 正常执行、VM 正常创建），
-     * 这里只是最后一道网，覆盖宿主自身或其它模块造成的同款异常 —— 不吞则整个进程被
-     * `KAppCrashUtils` 结束（表现为「抖音异常退出!」）。
+     * Root cause already fixed elsewhere: nothing is intercepted on `bind`, so the VM is
+     * initialized normally. 这里只是最后一道网，覆盖宿主自身或其它模块造成的同款异常 ——
+     * 不吞则整个进程被 `KAppCrashUtils` 结束（表现为「抖音异常退出!」）。
      */
     inner class HFeedPauseNpe : BaseHook() {
         override fun setTargetClass(): Class<*> {

@@ -105,10 +105,8 @@ class DouYinMain(private val app: Application) {
                     HChatListRecyclerViewAdapter()
                     HChatListRecyclerViewAdapterNew()
                     HChatListRecalledHint()
-                    // 信息流广告过滤（整表落表时剔除，依赖 DexKit 的 abstractFeedAdapterClazz）
+                    // Feed list sanitizing (whole-table path only, depends on DexKit abstractFeedAdapterClazz)
                     HFeedAdFilter()
-                    // 信息流广告兜底清理（notifyDataSetChanged 前把漏网的广告项真删）
-                    HFeedAdNotifySweep()
                     // 主 feed 数据流探针（诊断，默认关闭）
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
