@@ -101,6 +101,19 @@ class HFeedAdFilter : BaseHook() {
     }
 
     /**
+     * 31.7.1 entry points: `setData(java.util.List)` / `setData(java.util.List, boolean)`.
+     *
+     * The method is matched by name only, so both overloads are covered and the list is always
+     * `args[0]`. Same rule as above: filtering happens before the adapter takes the list, so the
+     * host never sees an inconsistent count.
+     */
+    @OnBefore("setData")
+    fun beforeSetData(params: MethodParam) {
+        val list = params.args.firstOrNull() as? List<*> ?: return
+        filterInPlace(params, list)
+    }
+
+    /**
      * 就地剔除广告项，并把适配器里与入参同源的平行列表抹平。
      *
      * 为什么需要「抹平」：`X.C1790160wg5` 这类子类在 `LJLILLLLZI(list)` 重写体里先把自己的
