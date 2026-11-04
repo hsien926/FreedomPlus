@@ -21,8 +21,15 @@ class HFeedAdapterProbe {
     }
 
     init {
-        val clazz = DexkitBuilder.abstractFeedAdapterClazz
-        if (clazz == null) {
+        probe()
+    }
+
+    /**
+     * Kept out of the `init` block: Kotlin forbids `return` inside an initializer, and without
+     * an early return the resolved class would stay nullable for the callers below.
+     */
+    private fun probe() {
+        val clazz = DexkitBuilder.abstractFeedAdapterClazz ?: run {
             KLogCat.tagI(TAG, "probe unavailable: adapter class was not resolved by DexKit")
             return
         }
