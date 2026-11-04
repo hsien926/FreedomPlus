@@ -25,11 +25,9 @@ import java.util.concurrent.ConcurrentHashMap
  * path not found, list missing, field not writable, filtering would empty the list,
  * or any exception along the way.
  *
- * Diagnostics (temporary, removed once the 31.7.1 path is confirmed):
- *  - the resolved access path is logged once per presenter class;
- *  - every callback logs one summary line (size / removed / first element), throttled to 1s;
- *  - when the resolved list holds at most one element, all list fields of the container are
- *    dumped once, which tells us immediately whether the wrong field was picked.
+ * Logging is intentionally sparse: the resolved path is reported once per presenter class, a
+ * failure is reported once per class, and a line is emitted only when entries are actually
+ * removed. Normal scrolling stays silent.
  */
 object SourceFilterLogic {
     private const val TAG = "FeedSourceFilter"
@@ -50,16 +48,13 @@ object SourceFilterLogic {
     private val noWrappedField: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
 
-    /** Diagnostics: classes already described in the log. */
+    /** Diagnostics: classes already reported in the log. */
     private val pathLogged: MutableSet<Class<*>> =
-        Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
-    private val dumpedContainers: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
     private val failureLogged: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
 
     private var removedTotal = 0
-    private var lastLogAt = 0L
 
     /** One resolved access path: intermediate fields, the last one being the list. */
     private class Path(val steps: List<Field>) {
@@ -84,10 +79,7 @@ object SourceFilterLogic {
         val holder = holderOf(host, path) ?: return fail(label, host, "holder is null")
         val listField = path.steps.last()
         val list = read(listField, holder) as? List<*> ?: return fail(label, host, "field is not a list")
-        if (list.isEmpty()) {
-            summarize(label, holder, list, removed = 0, wrapped = wrapped)
-            return 0
-        }
+        if (list.isEmpty()) return 0
 
         val kept = ArrayList<Any?>(list.size)
         var removed = 0
@@ -95,10 +87,7 @@ object SourceFilterLogic {
             if (isTargetItem(item, wrapped)) removed++ else kept.add(item)
         }
 
-        if (removed == 0) {
-            summarize(label, holder, list, removed = 0, wrapped = wrapped)
-            return 0
-        }
+        if (removed == 0) return 0
 
         // Never hand an empty list back: the host has branches for "no data" that skip notifying.
         if (kept.isEmpty()) return fail(label, host, "would empty the list (${list.size} entries)")
@@ -106,7 +95,7 @@ object SourceFilterLogic {
         if (!writeBack(holder, listField, kept)) return fail(label, host, "list field is not writable")
 
         removedTotal += removed
-        summarize(label, holder, list, removed, wrapped)
+        KLogCat.tagI(TAG, "[$label] removed $removed/${list.size} at source (total $removedTotal)")
         return removed
     }
 
@@ -298,47 +287,6 @@ object SourceFilterLogic {
     private fun logPath(clazz: Class<*>, path: Path) {
         if (!pathLogged.add(clazz)) return
         KLogCat.tagI(TAG, "path for ${clazz.name}: ${path.steps.joinToString(">") { it.name }}")
-    }
-
-    /** One summary line per callback (throttled), plus a container dump when the list looks wrong. */
-    private fun summarize(label: String, holder: Any, list: List<*>, removed: Int, wrapped: Boolean) {
-        val now = System.currentTimeMillis()
-        if (now - lastLogAt >= 1000L) {
-            lastLogAt = now
-
-            val first = list.firstOrNull()
-            val readable = if (first == null) {
-                false
-            } else {
-                val target = if (wrapped) wrappedItemOf(first) else first
-                target != null && runCatching { target.javaClass.getField("isAd") }.isSuccess
-            }
-
-            KLogCat.tagI(
-                TAG,
-                "[$label] ${list.size} entries, removed=$removed, " +
-                    "first=${first?.javaClass?.simpleName ?: "null"}, flagReadable=$readable",
-            )
-        }
-
-        if (list.size <= 1) dumpContainerLists(label, holder)
-    }
-
-    /** Lists every list field on the container once — exposes whether the wrong field was picked. */
-    private fun dumpContainerLists(label: String, holder: Any) {
-        if (!dumpedContainers.add(holder.javaClass)) return
-
-        val lists = allFields(holder.javaClass)
-            .filter { !Modifier.isStatic(it.modifiers) && List::class.java.isAssignableFrom(it.type) }
-            .joinToString(", ") { field ->
-                val size = (read(field, holder) as? List<*>)?.size ?: -1
-                "${field.name}=$size"
-            }
-
-        KLogCat.tagI(
-            TAG,
-            "[$label] container ${holder.javaClass.simpleName} lists: ${lists.ifEmpty { "(none)" }}",
-        )
     }
 
     private fun fail(label: String, host: Any, reason: String): Int {
