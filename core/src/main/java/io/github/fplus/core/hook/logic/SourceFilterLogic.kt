@@ -24,6 +24,12 @@ import java.util.concurrent.ConcurrentHashMap
  * Every failure mode returns -1 and leaves the data untouched (fail open):
  * path not found, list missing, field not writable, filtering would empty the list,
  * or any exception along the way.
+ *
+ * Diagnostics (temporary, removed once the 31.7.1 path is confirmed):
+ *  - the resolved access path is logged once per presenter class;
+ *  - every callback logs one summary line (size / removed / first element), throttled to 1s;
+ *  - when the resolved list holds at most one element, all list fields of the container are
+ *    dumped once, which tells us immediately whether the wrong field was picked.
  */
 object SourceFilterLogic {
     private const val TAG = "FeedSourceFilter"
@@ -44,10 +50,11 @@ object SourceFilterLogic {
     private val noWrappedField: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
 
-    /** Classes already described once in the log (diagnostics only). */
-    private val described: MutableSet<Class<*>> =
+    /** Diagnostics: classes already described in the log. */
+    private val pathLogged: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
-
+    private val dumpedContainers: MutableSet<Class<*>> =
+        Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
     private val failureLogged: MutableSet<Class<*>> =
         Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
 
@@ -64,18 +71,23 @@ object SourceFilterLogic {
      *
      * @param host the object the callback runs on (`MethodParam.thisObject`)
      * @param wrapped whether each element wraps the real item (follow feed) or is the item itself
+     * @param label log prefix, so recommend and follow callbacks can be told apart
      * @return number of removed entries, or -1 when nothing was changed
      */
-    fun filter(host: Any?, wrapped: Boolean, tag: String): Int {
+    fun filter(host: Any?, wrapped: Boolean, label: String): Int {
         if (host == null) return -1
 
         val path = resolvePath(host, wrapped)
-        if (!path.resolved) return fail(tag, host, "no access path")
+        if (!path.resolved) return fail(label, host, "no access path")
+        logPath(host.javaClass, path)
 
-        val holder = holderOf(host, path) ?: return fail(tag, host, "holder is null")
+        val holder = holderOf(host, path) ?: return fail(label, host, "holder is null")
         val listField = path.steps.last()
-        val list = read(listField, holder) as? List<*> ?: return fail(tag, host, "field is not a list")
-        if (list.isEmpty()) return 0
+        val list = read(listField, holder) as? List<*> ?: return fail(label, host, "field is not a list")
+        if (list.isEmpty()) {
+            summarize(label, holder, list, removed = 0, wrapped = wrapped)
+            return 0
+        }
 
         val kept = ArrayList<Any?>(list.size)
         var removed = 0
@@ -84,21 +96,17 @@ object SourceFilterLogic {
         }
 
         if (removed == 0) {
-            describe(tag, host, list, wrapped)
+            summarize(label, holder, list, removed = 0, wrapped = wrapped)
             return 0
         }
 
         // Never hand an empty list back: the host has branches for "no data" that skip notifying.
-        if (kept.isEmpty()) return fail(tag, host, "would empty the list (${list.size} entries)")
+        if (kept.isEmpty()) return fail(label, host, "would empty the list (${list.size} entries)")
 
-        if (!writeBack(holder, listField, kept)) return fail(tag, host, "list field is not writable")
+        if (!writeBack(holder, listField, kept)) return fail(label, host, "list field is not writable")
 
         removedTotal += removed
-        val now = System.currentTimeMillis()
-        if (now - lastLogAt >= 1000L) {
-            lastLogAt = now
-            KLogCat.tagI(TAG, "removed $removed/${list.size} at source (total $removedTotal)")
-        }
+        summarize(label, holder, list, removed, wrapped)
         return removed
     }
 
@@ -284,25 +292,58 @@ object SourceFilterLogic {
         return result
     }
 
-    // ------------------------------------------------------------------ logging
+    // ------------------------------------------------------------------ diagnostics
 
-    /** Describes the resolved list once per presenter class, so a wrong path is obvious in logs. */
-    private fun describe(tag: String, host: Any, list: List<*>, wrapped: Boolean) {
-        if (!described.add(host.javaClass)) return
+    /** Logs the resolved access path once per presenter class. */
+    private fun logPath(clazz: Class<*>, path: Path) {
+        if (!pathLogged.add(clazz)) return
+        KLogCat.tagI(TAG, "path for ${clazz.name}: ${path.steps.joinToString(">") { it.name }}")
+    }
 
-        val first = list.firstOrNull()
-        val flagged = first != null && isTargetItem(first, wrapped)
-        val readable = first != null && runCatching { first.javaClass.getField("isAd") }.isSuccess
+    /** One summary line per callback (throttled), plus a container dump when the list looks wrong. */
+    private fun summarize(label: String, holder: Any, list: List<*>, removed: Int, wrapped: Boolean) {
+        val now = System.currentTimeMillis()
+        if (now - lastLogAt >= 1000L) {
+            lastLogAt = now
+
+            val first = list.firstOrNull()
+            val readable = if (first == null) {
+                false
+            } else {
+                val target = if (wrapped) wrappedItemOf(first) else first
+                target != null && runCatching { target.javaClass.getField("isAd") }.isSuccess
+            }
+
+            KLogCat.tagI(
+                TAG,
+                "[$label] ${list.size} entries, removed=$removed, " +
+                    "first=${first?.javaClass?.simpleName ?: "null"}, flagReadable=$readable",
+            )
+        }
+
+        if (list.size <= 1) dumpContainerLists(label, holder)
+    }
+
+    /** Lists every list field on the container once — exposes whether the wrong field was picked. */
+    private fun dumpContainerLists(label: String, holder: Any) {
+        if (!dumpedContainers.add(holder.javaClass)) return
+
+        val lists = allFields(holder.javaClass)
+            .filter { !Modifier.isStatic(it.modifiers) && List::class.java.isAssignableFrom(it.type) }
+            .joinToString(", ") { field ->
+                val size = (read(field, holder) as? List<*>)?.size ?: -1
+                "${field.name}=$size"
+            }
+
         KLogCat.tagI(
             TAG,
-            "$tag: ${list.size} entries, first=${first?.javaClass?.name ?: "null"}, " +
-                "isAd=$flagged, isAdReadable=$readable",
+            "[$label] container ${holder.javaClass.simpleName} lists: ${lists.ifEmpty { "(none)" }}",
         )
     }
 
-    private fun fail(tag: String, host: Any, reason: String): Int {
+    private fun fail(label: String, host: Any, reason: String): Int {
         if (failureLogged.add(host.javaClass)) {
-            KLogCat.tagI(TAG, "$tag: skipped ($reason), source data left untouched")
+            KLogCat.tagI(TAG, "[$label] skipped ($reason), source data left untouched")
         }
         return -1
     }

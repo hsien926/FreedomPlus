@@ -42,7 +42,7 @@ class HFeedSourceFilter {
         @OnBefore("onSuccess")
         fun onSuccessBefore(params: MethodParam) {
             if (!ConfigV1.get().isAdBlock) return
-            SourceFilterLogic.filter(params.thisObject, wrapped = false, tag = TAG)
+            SourceFilterLogic.filter(params.thisObject, wrapped = false, label = "recommend")
         }
     }
 
@@ -58,7 +58,7 @@ class HFeedSourceFilter {
         @OnBefore("onSuccess")
         fun onSuccessBefore(params: MethodParam) {
             if (!ConfigV1.get().isAdBlock) return
-            SourceFilterLogic.filter(params.thisObject, wrapped = true, tag = TAG)
+            SourceFilterLogic.filter(params.thisObject, wrapped = true, label = "follow")
         }
     }
 }

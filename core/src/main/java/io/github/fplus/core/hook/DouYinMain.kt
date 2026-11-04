@@ -109,6 +109,8 @@ class DouYinMain(private val app: Application) {
                     HFeedAdFilter()
                     // Feed source filtering (runs inside the response callback, before the adapter)
                     HFeedSourceFilter()
+                    // Read-only adapter probe (temporary, used to locate the real list entry point)
+                    HFeedAdapterProbe()
                     // 主 feed 数据流探针（诊断，默认关闭）
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
