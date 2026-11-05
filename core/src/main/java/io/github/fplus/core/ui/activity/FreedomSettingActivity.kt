@@ -655,12 +655,22 @@ class FreedomSettingActivity : XplerActivity() {
     @Composable
     private fun DoubleClickTypeItem() {
         var showDoubleClickModeDialog by remember { mutableStateOf(false) }
+        val isEnabled by model.isDoubleClickType.observeAsState(false)
+        val mode by model.doubleClickType.observeAsState(2)
 
         SwitchItem(
             text = "双击视频响应类型",
-            subtext = "点击调整双击视频响应方式",
+            // 主开关关掉时选模式没有意义，这里把状态说清楚
+            subtext = if (isEnabled) {
+                "当前: ${if (mode == 1) "打开评论" else "点赞视频"}，点击调整"
+            } else {
+                "点击此处开启并选择双击响应方式"
+            },
             checked = model.isDoubleClickType.observeAsState(false),
             onClick = {
+                // 点整行 = 打开主开关 + 选模式。
+                // 只弹对话框不打开开关，会出现「选了打开评论但双击仍是点赞」的误解。
+                if (!isEnabled) model.changeIsDoubleClickType(true)
                 showDoubleClickModeDialog = true
             },
             onCheckedChange = {
@@ -669,7 +679,7 @@ class FreedomSettingActivity : XplerActivity() {
         )
 
         if (showDoubleClickModeDialog) {
-            var radioIndex by remember { mutableStateOf(model.doubleClickType.value ?: 2) }
+            var radioIndex by remember { mutableStateOf(mode) }
             FMessageDialog(
                 title = "请选择双击响应模式",
                 confirm = "更改",
@@ -705,6 +715,11 @@ class FreedomSettingActivity : XplerActivity() {
                             style = MaterialTheme.typography.body1,
                         )
                     }
+                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        text = "选「打开评论」后，双击不会再点赞。",
+                        style = MaterialTheme.typography.body2,
+                    )
                 }
             }
         }
