@@ -705,27 +705,16 @@ class FreedomSettingActivity : XplerActivity() {
                         // 只有「打开评论」才需要决定播放行为
                         if (radioIndex == 1) {
                             Spacer(modifier = Modifier.weight(1f))
-                            RadioButton(
-                                selected = pauseVideo,
-                                modifier = Modifier.size(28.dp),
-                                onClick = {
-                                    model.changeDoubleClickPauseVideo(true)
-                                },
-                            )
                             Text(
                                 text = "暂停播放",
                                 style = MaterialTheme.typography.body2,
                             )
-                            RadioButton(
-                                selected = !pauseVideo,
-                                modifier = Modifier.size(28.dp),
-                                onClick = {
-                                    model.changeDoubleClickPauseVideo(false)
+                            Spacer(modifier = Modifier.padding(horizontal = 4.dp))
+                            Switch(
+                                checked = pauseVideo,
+                                onCheckedChange = {
+                                    model.changeDoubleClickPauseVideo(it)
                                 },
-                            )
-                            Text(
-                                text = "保持播放",
-                                style = MaterialTheme.typography.body2,
                             )
                         }
                     }
