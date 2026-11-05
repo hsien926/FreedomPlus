@@ -75,6 +75,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _doubleClickType = MutableLiveData(2)
     val doubleClickType: LiveData<Int> = _doubleClickType
 
+    private var _doubleClickPauseVideo = MutableLiveData(false)
+    val doubleClickPauseVideo: LiveData<Boolean> = _doubleClickPauseVideo
+
     private var _isLongtimeVideoToast = MutableLiveData(false)
     val isLongtimeVideoToast: LiveData<Boolean> = _isLongtimeVideoToast
 
@@ -204,6 +207,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             changePreventRecalledOtherSetting(config.preventRecalledOtherSetting)
             changeIsDoubleClickType(config.isDoubleClickType)
             setDoubleClickType(config.doubleClickType)
+            changeDoubleClickPauseVideo(config.doubleClickPauseVideo)
             changeIsLongtimeVideoToast(config.isLongtimeVideoToast)
             changeIsVideoOptionBarFilter(config.isVideoOptionBarFilter)
             setVideoOptionBarFilterKeywords(config.videoOptionBarFilterKeywords)
@@ -336,6 +340,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setDoubleClickType(value: Int) {
         _doubleClickType.value = value
         config.doubleClickType = value
+    }
+
+    // 双击打开评论区后暂停播放
+    fun changeDoubleClickPauseVideo(value: Boolean) {
+        _doubleClickPauseVideo.value = value
+        config.doubleClickPauseVideo = value
     }
 
     // 视频时长超过10分钟提示

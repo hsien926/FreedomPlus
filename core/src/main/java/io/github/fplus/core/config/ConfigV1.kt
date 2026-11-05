@@ -191,6 +191,17 @@ class ConfigV1 private constructor() {
             field = value
         }
 
+    /// 双击打开评论区后暂停播放（false=继续播放，默认）
+    var doubleClickPauseVideo: Boolean = false
+        get() {
+            field = mmkv.getBoolean("doubleClickPauseVideo", false)
+            return field
+        }
+        set(value) {
+            mmkv.putBoolean("doubleClickPauseVideo", value)
+            field = value
+        }
+
     /// 视频时长超过10分钟提示
     var isLongtimeVideoToast: Boolean = false
         get() {

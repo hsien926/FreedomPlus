@@ -678,6 +678,18 @@ class FreedomSettingActivity : XplerActivity() {
             }
         )
 
+        // 「打开评论」模式下才有意义：抖音把只收到一次完整抬手当成单击，会顺带暂停播放
+        if (isEnabled && mode == 1) {
+            SwitchItem(
+                text = "打开评论区后暂停播放",
+                subtext = "关闭时双击打开评论区，视频继续播放",
+                checked = model.doubleClickPauseVideo.observeAsState(false),
+                onCheckedChange = {
+                    model.changeDoubleClickPauseVideo(it)
+                }
+            )
+        }
+
         if (showDoubleClickModeDialog) {
             var radioIndex by remember { mutableStateOf(mode) }
             FMessageDialog(
@@ -715,11 +727,6 @@ class FreedomSettingActivity : XplerActivity() {
                             style = MaterialTheme.typography.body1,
                         )
                     }
-                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
-                    Text(
-                        text = "选「打开评论」后，双击不会再点赞。",
-                        style = MaterialTheme.typography.body2,
-                    )
                 }
             }
         }

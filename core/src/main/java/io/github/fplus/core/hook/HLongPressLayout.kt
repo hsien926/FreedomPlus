@@ -1,6 +1,7 @@
 package io.github.fplus.core.hook
 
 import android.content.Context
+import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -49,6 +50,9 @@ class HLongPressLayout : BaseHook() {
             "com.ss.android.ugc.aweme.ad.feed.VideoViewHolderRootView"
 
         private const val TAG = "HLongPressLayout"
+
+        /** 双击后检查播放状态的延时（ms）：抖音的「单击确认」一般在抬手后 ~300ms 触发 */
+        private const val RESUME_CHECK_DELAY = 500L
 
         /** 评论按钮的 contentDescription，按「严 → 宽」排列，命中即用 */
         private val COMMENT_BUTTON_DESCRIPTIONS = listOf(
@@ -99,6 +103,9 @@ class HLongPressLayout : BaseHook() {
     /** 当前手势已被判定为「双击的第二下」时，需要按策略吞掉的档位；null 表示不接管 */
     private var swallowPolicy: SwallowPolicy? = null
 
+    /** 正在向宿主补发合成事件（CANCEL / 恢复播放的单击），这些事件不能再走状态机 */
+    private var injectingEvent: Boolean = false
+
     private var touchSlopCache: Int = -1
     private var doubleTapSlopCache: Int = -1
 
@@ -119,6 +126,10 @@ class HLongPressLayout : BaseHook() {
     @OnBefore("onTouchEvent")
     fun onTouchEventBefore(params: MethodParam, event: MotionEvent) {
         hookBlockRunning(params) {
+            // 模块自己补发的事件不参与状态机，否则会被当成一次真实轻点
+            if (injectingEvent)
+                return@hookBlockRunning
+
             val view = thisViewOrNull ?: return@hookBlockRunning
 
             when (event.actionMasked) {
@@ -214,9 +225,67 @@ class HLongPressLayout : BaseHook() {
             return null
 
         val policy = doubleTapSwallowPolicy
-        KLogCat.tagD(TAG, "双击命中: mode=打开评论, swallow=$policy")
+        val pauseAfterOpen = config.doubleClickPauseVideo
+        val wasPlaying = HPlayerController.isPlaying
+        KLogCat.tagD(
+            TAG,
+            "双击命中: swallow=$policy, pause=$pauseAfterOpen, playing=$wasPlaying",
+        )
+
+        if (!pauseAfterOpen) {
+            // 抖音没收到第二下，会在双击间隔之后把这一下当成「单击」→ 暂停播放。
+            // 补一个 CANCEL 让它的手势状态机复位（多数实现会因此撤掉待确认的单击）
+            sendCancelToHost(view)
+        }
+
         handler.post { openCommentPanel(view) }
+
+        if (!pauseAfterOpen && wasPlaying) {
+            // 兜底：CANCEL 未必能拦住（取决于抖音的实现）。稍后检查一次播放状态，
+            // 真的被暂停了再补一次单击把播放恢复回来
+            handler.postDelayed({ resumeIfPaused(view) }, RESUME_CHECK_DELAY)
+        }
         return policy
+    }
+
+    /** 向宿主补发一个 ACTION_CANCEL，让抖音的手势状态机复位 */
+    private fun sendCancelToHost(view: View) {
+        try {
+            val now = SystemClock.uptimeMillis()
+            val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, downX, downY, 0)
+            injectingEvent = true
+            view.onTouchEvent(cancel)
+            cancel.recycle()
+        } catch (e: Throwable) {
+            XplerLog.e(e)
+        } finally {
+            injectingEvent = false
+        }
+    }
+
+    /**
+     * 双击打开评论区后，如果视频被抖音当成「单击」暂停了，就补一次单击把播放切回来。
+     * 直接派发给宿主 View（不走窗口命中测试），评论区已经打开也照样生效。
+     */
+    private fun resumeIfPaused(view: View) {
+        try {
+            if (HPlayerController.isPlaying)
+                return
+
+            KLogCat.tagD(TAG, "双击后视频被暂停, 补一次单击恢复播放")
+            val now = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, downX, downY, 0)
+            val up = MotionEvent.obtain(now, now + 10, MotionEvent.ACTION_UP, downX, downY, 0)
+            injectingEvent = true
+            view.onTouchEvent(down)
+            view.onTouchEvent(up)
+            down.recycle()
+            up.recycle()
+        } catch (e: Throwable) {
+            XplerLog.e(e)
+        } finally {
+            injectingEvent = false
+        }
     }
 
     /**
