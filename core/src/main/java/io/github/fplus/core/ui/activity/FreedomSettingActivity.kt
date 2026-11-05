@@ -657,14 +657,15 @@ class FreedomSettingActivity : XplerActivity() {
         var showDoubleClickModeDialog by remember { mutableStateOf(false) }
         val isEnabled by model.isDoubleClickType.observeAsState(false)
         val mode by model.doubleClickType.observeAsState(2)
+        val pauseVideo by model.doubleClickPauseVideo.observeAsState(false)
 
         SwitchItem(
             text = "双击视频响应类型",
             // 主开关关掉时选模式没有意义，这里把状态说清楚
-            subtext = if (isEnabled) {
-                "当前: ${if (mode == 1) "打开评论" else "点赞视频"}，点击调整"
-            } else {
-                "点击此处开启并选择双击响应方式"
+            subtext = when {
+                !isEnabled -> "点击此处开启并选择双击响应方式"
+                mode == 1 -> "当前打开评论区时视频${if (pauseVideo) "暂停播放" else "保持播放"}，点击调整"
+                else -> "当前双击点赞视频，点击调整"
             },
             checked = model.isDoubleClickType.observeAsState(false),
             onClick = {
@@ -680,7 +681,6 @@ class FreedomSettingActivity : XplerActivity() {
 
         if (showDoubleClickModeDialog) {
             var radioIndex by remember { mutableStateOf(mode) }
-            val pauseVideo by model.doubleClickPauseVideo.observeAsState(false)
             FMessageDialog(
                 title = "请选择双击响应模式",
                 confirm = "更改",
