@@ -678,20 +678,9 @@ class FreedomSettingActivity : XplerActivity() {
             }
         )
 
-        // 「打开评论」模式下才有意义：抖音把只收到一次完整抬手当成单击，会顺带暂停播放
-        if (isEnabled && mode == 1) {
-            SwitchItem(
-                text = "打开评论区后暂停播放",
-                subtext = "关闭时双击打开评论区，视频继续播放",
-                checked = model.doubleClickPauseVideo.observeAsState(false),
-                onCheckedChange = {
-                    model.changeDoubleClickPauseVideo(it)
-                }
-            )
-        }
-
         if (showDoubleClickModeDialog) {
             var radioIndex by remember { mutableStateOf(mode) }
+            val pauseVideo by model.doubleClickPauseVideo.observeAsState(false)
             FMessageDialog(
                 title = "请选择双击响应模式",
                 confirm = "更改",
@@ -712,6 +701,33 @@ class FreedomSettingActivity : XplerActivity() {
                             text = "打开评论",
                             style = MaterialTheme.typography.body1,
                         )
+
+                        // 只有「打开评论」才需要决定播放行为
+                        if (radioIndex == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                            RadioButton(
+                                selected = pauseVideo,
+                                modifier = Modifier.size(28.dp),
+                                onClick = {
+                                    model.changeDoubleClickPauseVideo(true)
+                                },
+                            )
+                            Text(
+                                text = "暂停播放",
+                                style = MaterialTheme.typography.body2,
+                            )
+                            RadioButton(
+                                selected = !pauseVideo,
+                                modifier = Modifier.size(28.dp),
+                                onClick = {
+                                    model.changeDoubleClickPauseVideo(false)
+                                },
+                            )
+                            Text(
+                                text = "保持播放",
+                                style = MaterialTheme.typography.body2,
+                            )
+                        }
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         RadioButton(

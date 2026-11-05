@@ -64,21 +64,20 @@ class HLongPressLayout : BaseHook() {
     }
 
     /**
-     * 双击命中后吞掉的事件范围。
+     * 双击命中后对「第二次手势」的处理方式。
      *
      * 抖音的原生双击点赞在 `LongPressLayout` 的触摸流程内部触发，与 [android.view.GestureDetector]
-     * 一致：**第二次 ACTION_DOWN 就已经成立**。模块原先在 `@OnAfter("onTouchEvent")` 的第二次
-     * ACTION_UP 才判定，等判定出来点赞早已执行完，拦不住（38.6.0 实测现象）。
-     * 所以默认把「第二次手势」整体吞掉 —— 抖音侧收不到这次点击，原生点赞自然不会发生。
-     * 这是唯一不依赖抖音内部实现（混淆类名/方法名）的拦截方式，各版本通用。
+     * 一致：**第二次 ACTION_DOWN 就已经成立**，所以在 `@OnAfter` 的第二次 UP 才判定是拦不住的。
      *
-     * - [SwallowPolicy.DOWN_AND_UP] 吞 DOWN/MOVE/UP（默认）
-     * - [SwallowPolicy.UP_ONLY] 只吞 UP（若吞 DOWN 带来副作用，可切到这里对比验证）
-     * - [SwallowPolicy.NONE] 不拦截，仅打开评论区（兜底，等同「双击 = 点赞 + 开评论」）
+     * 关键词：抖音把「只收到一次完整抬手」当成单击 → 暂停播放；而它只有在收到下一次
+     * ACTION_DOWN 时才会撤掉这个「待确认的单击」。因此：
+     *
+     * - [SwallowPolicy.REBOUND_DOWN]（保持播放）：把第二次 DOWN 的横坐标挪到屏幕另一端再放行 ——
+     *   抖音据此撤掉待确认的单击（**不暂停**），又因为位置对不上不会判定为双击（**不点赞**）；
+     *   随后的 MOVE/UP 仍然吞掉，免得它又补一次单击确认。
+     * - [SwallowPolicy.SWALLOW_ALL]（暂停播放）：整体吞掉，抖音就把前面那一下当单击，顺带暂停。
      */
-    private enum class SwallowPolicy { DOWN_AND_UP, UP_ONLY, NONE }
-
-    private val doubleTapSwallowPolicy = SwallowPolicy.DOWN_AND_UP
+    private enum class SwallowPolicy { REBOUND_DOWN, SWALLOW_ALL }
 
     private val config
         get() = ConfigV1.get()
@@ -159,9 +158,17 @@ class HLongPressLayout : BaseHook() {
                 val policy = handleDoubleTap(view)
                 if (policy != null) {
                     swallowPolicy = policy
-                    if (policy == SwallowPolicy.DOWN_AND_UP) params.setResult(true)
                     cancelLongPress()
                     lastTapValid = false
+                    if (policy == SwallowPolicy.SWALLOW_ALL) {
+                        params.setResult(true)
+                    } else {
+                        // 把这一下的横坐标挪到屏幕另一端再交给抖音：
+                        // 位置对不上 → 不判定双击（不点赞），但收到 DOWN 会让它撤掉待确认的单击（不暂停）。
+                        // 仍留在 View 内，保证事件被消费掉，不会漏给上层 ViewPager。
+                        val targetX = if (downX < screenSize.width / 2) screenSize.width - 2f else 2f
+                        event.offsetLocation(targetX - downX, 0f)
+                    }
                     return
                 }
             }
@@ -174,7 +181,8 @@ class HLongPressLayout : BaseHook() {
     }
 
     private fun onGestureMove(params: MethodParam, view: View, event: MotionEvent) {
-        if (swallowPolicy == SwallowPolicy.DOWN_AND_UP) {
+        // 双击的第二下已被接管：MOVE 一律不透给抖音
+        if (swallowPolicy != null) {
             params.setResult(true)
             return
         }
@@ -194,7 +202,7 @@ class HLongPressLayout : BaseHook() {
         val policy = swallowPolicy
         swallowPolicy = null
         if (policy != null) {
-            // 双击已由模块接管：吞掉抬起（DOWN_AND_UP 时 DOWN/MOVE 也已吞掉）
+            // 双击已由模块接管：抬起也吞掉，否则抖音会拿它再补一次「单击确认」
             params.setResult(true)
             lastTapValid = false
             return
@@ -224,43 +232,21 @@ class HLongPressLayout : BaseHook() {
         if (HDetailPageFragment.isComment)
             return null
 
-        val policy = doubleTapSwallowPolicy
         val pauseAfterOpen = config.doubleClickPauseVideo
+        val policy = if (pauseAfterOpen) SwallowPolicy.SWALLOW_ALL else SwallowPolicy.REBOUND_DOWN
         val wasPlaying = HPlayerController.isPlaying
         KLogCat.tagD(
             TAG,
-            "双击命中: swallow=$policy, pause=$pauseAfterOpen, playing=$wasPlaying",
+            "双击命中: policy=$policy, pause=$pauseAfterOpen, playing=$wasPlaying",
         )
-
-        if (!pauseAfterOpen) {
-            // 抖音没收到第二下，会在双击间隔之后把这一下当成「单击」→ 暂停播放。
-            // 补一个 CANCEL 让它的手势状态机复位（多数实现会因此撤掉待确认的单击）
-            sendCancelToHost(view)
-        }
 
         handler.post { openCommentPanel(view) }
 
         if (!pauseAfterOpen && wasPlaying) {
-            // 兜底：CANCEL 未必能拦住（取决于抖音的实现）。稍后检查一次播放状态，
-            // 真的被暂停了再补一次单击把播放恢复回来
+            // 兜底：万一某种实现下仍然被暂停了，稍后再补一次单击把播放恢复回来
             handler.postDelayed({ resumeIfPaused(view) }, RESUME_CHECK_DELAY)
         }
         return policy
-    }
-
-    /** 向宿主补发一个 ACTION_CANCEL，让抖音的手势状态机复位 */
-    private fun sendCancelToHost(view: View) {
-        try {
-            val now = SystemClock.uptimeMillis()
-            val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, downX, downY, 0)
-            injectingEvent = true
-            view.onTouchEvent(cancel)
-            cancel.recycle()
-        } catch (e: Throwable) {
-            XplerLog.e(e)
-        } finally {
-            injectingEvent = false
-        }
     }
 
     /**
