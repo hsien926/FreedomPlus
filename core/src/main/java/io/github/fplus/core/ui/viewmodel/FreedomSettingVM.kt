@@ -13,6 +13,7 @@ import com.freegang.extension.readAssetsAsText
 import com.freegang.ktutils.app.KAppUtils
 import com.freegang.ktutils.net.KUrlUtils
 import io.github.fplus.core.config.ConfigV1
+import io.github.fplus.core.config.EmojiAnimateFormat
 import io.github.webdav.WebDav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -47,6 +48,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _vibrate = MutableLiveData(false)
     val isVibrate: LiveData<Boolean> = _vibrate
 
+    private var _emojiAnimateFormat = MutableLiveData(EmojiAnimateFormat.SOURCE.label)
+    val emojiAnimateFormat: LiveData<String> = _emojiAnimateFormat
+
     private var _isTranslucent = MutableLiveData(false)
     val isTranslucent: LiveData<Boolean> = _isTranslucent
 
@@ -70,6 +74,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
 
     private var _doubleClickType = MutableLiveData(2)
     val doubleClickType: LiveData<Int> = _doubleClickType
+
+    private var _doubleClickPauseVideo = MutableLiveData(false)
+    val doubleClickPauseVideo: LiveData<Boolean> = _doubleClickPauseVideo
 
     private var _isLongtimeVideoToast = MutableLiveData(false)
     val isLongtimeVideoToast: LiveData<Boolean> = _isLongtimeVideoToast
@@ -191,6 +198,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             setVideoCoding(config.videoCoding)
             changeIsEmojiDownload(config.isEmojiDownload)
             setVibrate(config.vibrate)
+            setEmojiAnimateFormat(config.emojiAnimateFormat)
             changeIsTranslucent(config.isTranslucent)
             setTranslucentValue(config.translucentValue)
             changeIsRemoveSticker(config.isRemoveSticker)
@@ -199,6 +207,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             changePreventRecalledOtherSetting(config.preventRecalledOtherSetting)
             changeIsDoubleClickType(config.isDoubleClickType)
             setDoubleClickType(config.doubleClickType)
+            changeDoubleClickPauseVideo(config.doubleClickPauseVideo)
             changeIsLongtimeVideoToast(config.isLongtimeVideoToast)
             changeIsVideoOptionBarFilter(config.isVideoOptionBarFilter)
             setVideoOptionBarFilterKeywords(config.videoOptionBarFilterKeywords)
@@ -278,6 +287,13 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
         config.vibrate = value
     }
 
+    // 下载动图格式（跟随源 / GIF / MP4）
+    fun setEmojiAnimateFormat(value: String) {
+        val normalized = EmojiAnimateFormat.fromLabel(value).label
+        _emojiAnimateFormat.value = normalized
+        config.emojiAnimateFormat = normalized
+    }
+
     // 首页控件半透明
     fun changeIsTranslucent(value: Boolean) {
         _isTranslucent.value = value
@@ -324,6 +340,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setDoubleClickType(value: Int) {
         _doubleClickType.value = value
         config.doubleClickType = value
+    }
+
+    // 双击打开评论区后暂停播放
+    fun changeDoubleClickPauseVideo(value: Boolean) {
+        _doubleClickPauseVideo.value = value
+        config.doubleClickPauseVideo = value
     }
 
     // 视频时长超过10分钟提示

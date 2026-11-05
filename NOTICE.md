@@ -25,7 +25,7 @@
 
 相对上述基座，本项目自行实现的部分：
 
-- `core` 模块新增广告拦截与信息流拦截相关 hook（`HAdBlock`、`HFeedAdBlock`、`HFeedAdBlockPlayable`、`HFeedAdFilter` 等）；
+- `core` 模块新增广告拦截与信息流拦截相关 hook（`HAdBlock`、`HFeedAdFilter` 等）；
 - 抖音 40.6.0 适配：崩溃修复、DexKit matcher 修正、混淆名漂移兼容；
 - 移除内置 OTA，模块不再发起任何对外网络请求；
 - 构建体系整理：签名配置外部化、依赖版本对齐。

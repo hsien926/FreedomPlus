@@ -30,9 +30,12 @@ class HEmojiPopupWindow : BaseHook() {
             if (!config.isEmojiDownload)
                 return
 
-            popUrlList = emoji?.detailEmoji?.animateUrl?.urlList
-                ?: emoji?.detailEmoji?.staticUrl?.urlList
-                        ?: emptyList()
+            // 动图优先; animateUrl 存在但 urlList 为空时同样要回退到 staticUrl.
+            // 旧实现用 `?:` 只判 null, 列表为空会被当成"已取到", 结果保存不下.
+            val detailEmoji = emoji?.detailEmoji
+            popUrlList = detailEmoji?.animateUrl?.urlList?.takeIf { it.isNotEmpty() }
+                ?: detailEmoji?.staticUrl?.urlList?.takeIf { it.isNotEmpty() }
+                ?: emptyList()
         }.onFailure {
             XplerLog.e(it)
         }

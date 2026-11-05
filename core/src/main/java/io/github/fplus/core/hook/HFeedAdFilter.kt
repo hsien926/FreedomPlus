@@ -55,9 +55,9 @@ import java.util.concurrent.ConcurrentHashMap
  * - `getCount()` 永远等于真实数据量 → 上面 1/2/3 全部不成立；
  * - notify 仍由抖音自己发，`mExpectedAdapterCount` 与 `getCount()` 永远同步。
  *
- * 只有走 `LJJLIL(int,int,List)` / `LJJLJ(int,Aweme)`（带插入位置/条数的接口）进来的广告项
- * 不在这里处理：改它们的入参会把抖音的索引算错。那部分由 [HFeedAdBlock]
- * （`VideoViewHolder.bind` 前置拦截）兜底成空白页 —— 不动 count，不会再引发崩溃。
+ * Items inserted through `LJJLIL(int,int,List)` / `LJJLJ(int,Aweme)` are left untouched here:
+ * rewriting their arguments corrupts the host's positional arithmetic. They are passed through
+ * as-is and play normally — never touched at runtime.
  */
 class HFeedAdFilter : BaseHook() {
     companion object {
@@ -101,6 +101,19 @@ class HFeedAdFilter : BaseHook() {
     }
 
     /**
+     * 31.7.1 entry points: `setData(java.util.List)` / `setData(java.util.List, boolean)`.
+     *
+     * The method is matched by name only, so both overloads are covered and the list is always
+     * `args[0]`. Same rule as above: filtering happens before the adapter takes the list, so the
+     * host never sees an inconsistent count.
+     */
+    @OnBefore("setData")
+    fun beforeSetData(params: MethodParam) {
+        val list = params.args.firstOrNull() as? List<*> ?: return
+        filterInPlace(params, list)
+    }
+
+    /**
      * 就地剔除广告项，并把适配器里与入参同源的平行列表抹平。
      *
      * 为什么需要「抹平」：`X.C1790160wg5` 这类子类在 `LJLILLLLZI(list)` 重写体里先把自己的
@@ -121,6 +134,14 @@ class HFeedAdFilter : BaseHook() {
         val total = src.size
         val kept = src.filterNot { isAdAweme(it) }
         val removed = total - kept.size
+
+        // Fail open: never empty a whole table. The host treats `getCount() == 0` as a
+        // "replace the table without notifying" branch, which leaves the pager's expected
+        // count permanently stale.
+        if (kept.isEmpty()) {
+            KLogCat.tagI(TAG, "skip: cleaning would empty the whole table ($total items), fail open")
+            return
+        }
 
         if (removed <= 0) {
             if (lastLoggedSize != total) {

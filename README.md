@@ -3,6 +3,7 @@
 > 抖音去广告与功能增强的 Xposed / LSPosed 模块，开源、无广告、不联网上传任何数据。
 
 [![GitHub release](https://img.shields.io/github/v/release/hsien926/FreedomPlus?display_name=release)](https://github.com/hsien926/FreedomPlus/releases)
+[![Build](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml/badge.svg)](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B%20(API%2024%2B)-green)]()
 
@@ -98,14 +99,17 @@
 | 项 | 说明 |
 |---|---|
 | 实测基准 | 抖音 **40.6.0**（小米 M2102K1C / Android 17） |
+| 已验证版本 | 抖音 **31.7.1 (310702)**、**31.7.2 (310703)**、**38.6.0 (380600)** |
 | 声明适配 | 抖音 **28.0.0 ~ 40.6.0** |
 | 配置依据 | 随包分发的 `assets/versions.json` |
+
+> **关于验证包**：31.7.x 与 38.6.0 都不是应用商店下载的正式版，而是**手机出厂预装**的抖音 —— 31.7.2 为 Xiaomi 17 出厂版本，38.6.0 为 OPPO Find X10 Pro Max 出厂版本。安装包分别约 **140MB** 与 **160MB**，明显小于商店正式版（40.x 约 300MB 量级）。出厂包剔除了部分在线模块（例如搜索、本地生活被拆成插件），组件更少，但信息流与广告相关的类结构一致，因此同样可作为验证基准。
 
 > **v1.3.9 真机验证说明**：PagerAdapter 崩溃修复已在**小米手机**完成真机验证。其他品牌手机的系统实现、权限策略和厂商定制可能不同，需自行测试。
 
 抖音会持续重命名与混淆内部类。本项目的定位策略以**未混淆的类、方法、字段**为锚点（例如 `Aweme.isAd`、`BaseAd.adParser`），并借助 [DexKit](https://github.com/LuckyPray/DexKit) 做特征匹配，因此在混淆名漂移时具备一定自愈能力；但锚点本身被移除时相关功能会静默失效并记录日志。
 
-**遇到问题时请先查阅 [已知限制](docs/已知限制.md)**，其中逐条列出了 40.6.0 下已确认失效或未验证的功能及其归因。
+**遇到问题时请先查阅 [已知限制](docs/已知限制.md)**，其中逐条列出了各版本已确认失效或未验证的功能及其归因。
 
 ---
 
