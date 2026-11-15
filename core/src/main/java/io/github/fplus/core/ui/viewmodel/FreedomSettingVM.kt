@@ -128,6 +128,9 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     private var _defaultAutoPlay = MutableLiveData(false)
     val defaultAutoPlay: LiveData<Boolean> = _defaultAutoPlay
 
+    private var _isHighRefreshRate = MutableLiveData(false)
+    val isHighRefreshRate: LiveData<Boolean> = _isHighRefreshRate
+
     private var _isImmersive = MutableLiveData(false)
     val isImmersive: LiveData<Boolean> = _isImmersive
 
@@ -213,6 +216,7 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
             changeIsAutoPlay(config.isAutoPlay)
             setAddAutoPlayButton(config.addAutoPlayButton)
             setDefaultAutoPlay(config.defaultAutoPlay)
+            _isHighRefreshRate.value = withContext(Dispatchers.IO) { config.isHighRefreshRate }
             changeIsImmersive(config.isImmersive)
             setSystemControllerValue(config.systemControllerValue)
             changeIsCommentColorMode(config.isCommentColorMode)
@@ -442,6 +446,12 @@ class FreedomSettingVM(application: Application) : AndroidViewModel(application)
     fun setDefaultAutoPlay(value: Boolean) {
         _defaultAutoPlay.value = value
         config.defaultAutoPlay = value
+    }
+
+    // 高刷新率
+    fun changeIsHighRefreshRate(value: Boolean) {
+        _isHighRefreshRate.value = value
+        config.isHighRefreshRate = value
     }
 
     // 全屏沉浸

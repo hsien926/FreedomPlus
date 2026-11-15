@@ -19,6 +19,7 @@ xposed-api = "82"
 
 
 [libraries]
+junit = { module = "junit:junit", version = "4.13.2" }
 core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "core-ktx" }
 appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
 android-material = { group = "com.google.android.material", name = "material", version.ref = "android-material" }

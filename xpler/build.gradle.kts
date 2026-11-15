@@ -30,7 +30,7 @@ android {
 }
 
 dependencies {
-    compileOnly(files("libs/api-82.jar"))
+    compileOnly(libs.xposed.api)
     implementation("androidx.core:core-ktx:1.1.0")
     implementation("androidx.appcompat:appcompat:1.1.0")
 }

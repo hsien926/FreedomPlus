@@ -9,6 +9,7 @@ import com.freegang.extension.storageRootFile
 import com.tencent.mmkv.MMKV
 import com.tencent.mmkv.MMKV.LibLoader
 import io.github.webdav.WebDav
+import io.github.fplus.core.helper.HighRefreshConfigClient
 import org.json.JSONObject
 import java.io.File
 
@@ -25,6 +26,12 @@ class ConfigV1 private constructor() {
 
         private val config by lazy { ConfigV1() }
 
+        @Volatile
+        private var high_refresh_context: Context? = null
+
+        private val high_refresh_lock = Any()
+        private const val high_refresh_pending_key = "isHighRefreshRate.pendingSync"
+
         fun getFreedomDir(context: Context): File {
             return context.applicationContext.storageRootFile
                 .child(Environment.DIRECTORY_DOWNLOADS)
@@ -38,10 +45,12 @@ class ConfigV1 private constructor() {
 
         fun initialize(context: Context, libLoader: LibLoader? = null) {
             MMKV.initialize(context, getConfigDir(context).absolutePath, libLoader)
+            high_refresh_context = context.applicationContext
         }
 
         fun clear(context: Context) {
             mmkv.clearAll()
+            get().isHighRefreshRate = false
             getFreedomDir(context).deleteRecursively()
         }
 
@@ -468,6 +477,34 @@ class ConfigV1 private constructor() {
         set(value) {
             mmkv.putString("preventRecalledOtherSetting", value.joinToString())
             field = value
+        }
+
+    /// 同一个高刷开关控制应用侧与系统侧；应用侧Hook仍在重启抖音后注册。
+    var isHighRefreshRate: Boolean = false
+        get() = synchronized(high_refresh_lock) {
+            val legacy = mmkv.getBoolean("isHighRefreshRate", false)
+            if (mmkv.getBoolean(high_refresh_pending_key, false)) {
+                if (HighRefreshConfigClient.write_enabled(high_refresh_context, legacy)) {
+                    mmkv.removeValueForKey(high_refresh_pending_key)
+                } else {
+                    field = legacy
+                    return@synchronized legacy
+                }
+            }
+            val shared = HighRefreshConfigClient.read_enabled(high_refresh_context, legacy) ?: legacy
+            if (shared != legacy) mmkv.putBoolean("isHighRefreshRate", shared)
+            field = shared
+            shared
+        }
+        set(value) {
+            synchronized(high_refresh_lock) {
+                mmkv.putBoolean("isHighRefreshRate", value)
+                mmkv.putBoolean(high_refresh_pending_key, true)
+                field = value
+                if (HighRefreshConfigClient.write_enabled(high_refresh_context, value)) {
+                    mmkv.removeValueForKey(high_refresh_pending_key)
+                }
+            }
         }
 
     /// 全屏沉浸式
