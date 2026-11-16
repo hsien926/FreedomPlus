@@ -1,9 +1,9 @@
+// Kotlin · DownloadLogic.kt · Android 7+ / Xposed · 视频图文音乐下载
 package io.github.fplus.core.hook.logic
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import com.freegang.extension.child
 import com.freegang.extension.need
 import com.freegang.extension.pureFileName
@@ -16,11 +16,14 @@ import com.freegang.ktutils.media.KMediaUtils
 import com.freegang.ktutils.net.KHttpUtils
 import com.freegang.ktutils.text.KTextUtils
 import com.ss.android.ugc.aweme.feed.model.Aweme
+import com.ss.ugc.aweme.ImageUrlStruct
 import de.robv.android.xposed.XposedBridge
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
+import io.github.fplus.core.helper.CommentMediaResolver
 import io.github.webdav.WebDav
 import io.github.xpler.core.XplerLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -195,161 +198,74 @@ class DownloadLogic(
      * @param aweme
      */
     private fun downloadImages(aweme: Aweme, isWebDav: Boolean = false) {
-        val structList = aweme.getImageUrlList()
-        if (structList.isEmpty()) {
+        val struct_list = aweme.getImageUrlList().toList()
+        if (struct_list.isEmpty()) {
             hook.showToast(context, "未获取到图片信息")
             return
         }
-
         if (config.notificationDownload) {
-            // 发送通知
             hook.showDownloadNotification(
                 context = context,
                 notifyId = downloadNotifyId++,
                 title = mPureFileName,
-                listener = {
-                    // 下载逻辑
+                listener = { notify ->
                     hook.singleLaunchIO(mPureFileName) {
-                        val imageFiles = mutableListOf<File>()
-                        var downloadCount = 0 // 下载计数器
-                        structList.forEachIndexed { index, urlStruct ->
-                            val url = urlStruct.urlList.firstOrNull()
-                            if (url.isNullOrBlank()) {
-                                // 少数图文条目 urlList 为空，跳过即可；
-                                // 用 first() 会抛 NoSuchElementException 打断整组下载。
-                                XplerLog.d("图片URL为空, 跳过 index=$index")
-                                return@forEachIndexed
-                            }
-                            val resultFile = downloadFile(
-                                url = url,
-                                downloadFile = File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.jpg")),
-                                notify = it,
-                                progressText = "$index/${aweme.images.size} %s%%",
-                            )
-                            if (resultFile != null) {
-                                // 抖音部分图文是 VVIC/HEIC，相册和电脑都打不开：用抖音内置解码器就地转成 JPEG
-                                HeifTranscoder.transcodeInPlace(resultFile)
-                                downloadCount += 1
-                                imageFiles.add(resultFile)
-                                KMediaUtils.notifyMediaUpdate(context, resultFile.absolutePath)
-                            }
-                        }
-
-                        hook.refresh {
-                            if (downloadCount == aweme.images.size) {
-                                val message =
-                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${downloadCount}个文件!"
-                                it.setFinishedText(message)
-                                hook.showToast(context, message)
-                            } else {
-                                val failCount = aweme.images.size - downloadCount
-                                it.setFinishedText("下载成功${downloadCount}, 失败${failCount}!")
-                                hook.showToast(context, "下载成功${downloadCount}, 失败${failCount}!")
-                                Toast.makeText(context, "正在上传WebDav!", Toast.LENGTH_SHORT).show()
-
-                            }
-                        }
-
-
-                        // 上传WebDav
-                        if (isWebDav) {
-                            if (imageFiles.isEmpty()) {
-                                hook.refresh {
-                                    it.setFinishedText("上传WebDav失败, 无法找到已下载的内容!")
-                                    hook.showToast(context, "上传WebDav失败, 无法找到已下载的内容!")
-                                }
-                                return@singleLaunchIO
-                            }
-                            var uploadCount = 0
-                            for (image in imageFiles) {
-                                val uploadStatus = uploadToWebDav(image)
-                                if (uploadStatus) uploadCount += 1
-                            }
-                            hook.refresh {
-                                if (uploadCount == imageFiles.size) {
-                                    it.setFinishedText("上传WebDav成功!")
-                                    hook.showToast(context, "上传WebDav成功!")
-                                } else {
-                                    it.setFinishedText("上传WebDav成功${uploadCount}, 失败${imageFiles.size - uploadCount}!")
-                                    hook.showToast(
-                                        context,
-                                        "上传WebDav成功${uploadCount}, 失败${imageFiles.size - uploadCount}!"
-                                    )
-                                }
-                            }
-                        }
+                        download_image_files(struct_list, notify, isWebDav)
                     }
-                }
+                },
             )
         } else {
-            // 进度条Dialog
             hook.showProgressDialog(
                 context = context,
                 title = "Freedom+",
                 listener = { dismiss, notify ->
-                    // 下载逻辑
                     hook.singleLaunchIO(mPureFileName) {
-                        var downloadCount = 0 // 下载计数器
-                        structList.forEachIndexed { index, urlStruct ->
-                            val url = urlStruct.urlList.firstOrNull()
-                            if (url.isNullOrBlank()) {
-                                // 同上：空 URL 跳过，避免打断整组图片下载
-                                XplerLog.d("图片URL为空, 跳过 index=$index")
-                                return@forEachIndexed
-                            }
-                            val resultFile = downloadFile(
-                                url = url,
-                                downloadFile = File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.jpg")),
-                                notify = notify,
-                                progressText = "$index/${aweme.images.size} %s%%",
-                            )
-                            if (resultFile != null) {
-                                // 同上：VVIC/HEIC 就地转 JPEG
-                                HeifTranscoder.transcodeInPlace(resultFile)
-                                downloadCount += 1
-                                KMediaUtils.notifyMediaUpdate(context, resultFile.absolutePath)
-                            }
-                        }
-
-                        hook.refresh {
-                            dismiss.invoke()
-                            if (downloadCount == aweme.images.size) {
-                                val message =
-                                    if (isWebDav) "下载成功, 正在上传WebDav!" else "下载成功, 共${downloadCount}个文件!"
-                                notify.setFinishedText(message)
-                                hook.showToast(context, message)
-                            } else {
-                                val failCount = aweme.images.size - downloadCount
-                                notify.setFinishedText("下载成功${downloadCount}, 失败${failCount}!")
-                                hook.showToast(context, "下载成功${downloadCount}, 失败${failCount}!")
-                                Toast.makeText(context, "正在上传WebDav!", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-
-                        // 上传WebDav
-                        if (isWebDav) {
-                            val images = (mImageParent.listFiles() ?: arrayOf<File>()).filter { it.isFile }
-                            if (images.isEmpty()) {
-                                hook.showToast(context, "上传WebDav失败, 无法找到已下载的内容!")
-                                return@singleLaunchIO
-                            }
-                            var uploadCount = 0
-                            for (image in images) {
-                                val uploadStatus = uploadToWebDav(image)
-                                if (uploadStatus) uploadCount += 1
-                            }
-                            if (uploadCount == images.size) {
-                                hook.showToast(context, "上传WebDav成功!")
-                            } else {
-                                hook.showToast(
-                                    context,
-                                    "上传WebDav成功${uploadCount}, 失败${images.size - uploadCount}!"
-                                )
-                            }
+                        try {
+                            download_image_files(struct_list, notify, isWebDav)
+                        } finally {
+                            hook.refresh { dismiss() }
                         }
                     }
-                }
+                },
             )
+        }
+    }
+
+    private suspend fun download_image_files(
+        structs: List<ImageUrlStruct>,
+        notify: IProgressNotification,
+        is_webdav: Boolean,
+    ) {
+        val save_video = config.isLivePhotoVideo
+        val results = structs.mapIndexed { index, image ->
+            val video_required = save_video && runCatching { image.video != null }.getOrDefault(false)
+            val video_url = if (video_required) runCatching {
+                image.animatedVideoUrlList().firstOrNull { it.isNotBlank() }
+            }.getOrNull() else null
+            download_image_item(index, image, video_url, video_required, notify, "${index + 1}/${structs.size} %s%%")
+        }
+        val summary = ImageDownloadSummary(results)
+        summary.files.forEach { file ->
+            runCatching { KMediaUtils.notifyMediaUpdate(context, file.absolutePath) }.onFailure { XplerLog.e(it) }
+        }
+        val download_message = summary.message()
+        val initial_message = if (is_webdav && summary.files.isNotEmpty()) {
+            "$download_message 正在上传已保存文件至WebDAV!"
+        } else download_message
+        publish_image_result(notify, initial_message)
+        if (!is_webdav || summary.files.isEmpty()) return
+
+        // 两个入口共用这份清单，不能扫描整个目录把历史文件和残缺文件一起上传。
+        val uploaded = summary.files.count { uploadToWebDav(it) }
+        val upload_message = if (uploaded == summary.files.size) "上传WebDAV成功!" else
+            "上传WebDAV成功${uploaded}, 失败${summary.files.size - uploaded}!"
+        publish_image_result(notify, "$download_message $upload_message")
+    }
+
+    private fun publish_image_result(notify: IProgressNotification, message: String) {
+        hook.refresh {
+            notify.setFinishedText(message)
+            hook.showToast(context, message)
         }
     }
 
@@ -451,15 +367,58 @@ class DownloadLogic(
                 sourceUrl = url,
                 file = downloadFile,
             ) { real, total, e ->
-                if (e != null)
+                if (e != null) {
                     XplerLog.e(e)
-
-                if (notify is KNotifiUtils.ProgressNotification) { // 通知栏在ui线程中刷新会造成ui卡顿, 排查了一下午, 麻了
-                    notify.notifyProgress((real * 100 / total).toInt(), progressText)
+                    return@download
+                }
+                val progress = DownloadProgress.percent(real, total)
+                if (notify is KNotifiUtils.ProgressNotification) {
+                    notify.notifyProgress(progress, progressText)
                 } else {
-                    hook.refresh { notify.notifyProgress((real * 100 / total).toInt(), progressText) }
+                    hook.refresh { notify.notifyProgress(progress, progressText) }
                 }
             }
+        }
+    }
+
+    private suspend fun download_image_item(
+        index: Int,
+        image: ImageUrlStruct,
+        video_url: String?,
+        video_required: Boolean,
+        notify: IProgressNotification,
+        progress_text: String,
+    ): ImageDownloadResult {
+        val image_file = download_image_asset(
+            CommentMediaResolver.image_urls(image).firstOrNull(),
+            File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.jpg")),
+            notify, progress_text, transcode_image = true,
+        )
+        val video_file = if (video_required) download_image_asset(
+            video_url,
+            File(mImageParent.need(), mPureFileName.secureFilename("_${index + 1}.mp4")),
+            notify, progress_text,
+        ) else null
+        return ImageDownloadResult(image_file, video_required, video_file)
+    }
+
+    private suspend fun download_image_asset(
+        url: String?,
+        file: File,
+        notify: IProgressNotification,
+        progress_text: String,
+        transcode_image: Boolean = false,
+    ): File? {
+        if (url.isNullOrBlank()) return null
+        return try {
+            downloadFile(url, file, notify, progress_text)?.also {
+                if (transcode_image) HeifTranscoder.transcodeInPlace(it)
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            XplerLog.e(error)
+            null
         }
     }
 

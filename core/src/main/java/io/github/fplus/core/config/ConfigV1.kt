@@ -90,6 +90,17 @@ class ConfigV1 private constructor() {
             field = value
         }
 
+    /// 实况/动图保存视频（关：只存静态图；开：存其短视频）
+    var isLivePhotoVideo: Boolean = false
+        get() {
+            field = mmkv.getBoolean("isLivePhotoVideo", false)
+            return field
+        }
+        set(value) {
+            mmkv.putBoolean("isLivePhotoVideo", value)
+            field = value
+        }
+
     /// 复制链接时弹出下载
     var copyLinkDownload: Boolean = false
         get() {

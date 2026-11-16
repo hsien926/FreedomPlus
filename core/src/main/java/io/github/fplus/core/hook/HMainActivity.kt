@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.ActivityOptions
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -89,17 +90,22 @@ class HMainActivity : BaseHook() {
     fun onCreateBefore(params: MethodParam, savedInstanceState: Bundle?) {
         hookBlockRunning(params) {
             thisActivity.runCatching {
-                val startModuleSetting = intent?.getBooleanExtra("startModuleSetting", false) ?: false
+                val source_intent = intent ?: return@runCatching
+                val startModuleSetting = source_intent.getBooleanExtra("startModuleSetting", false)
                 if (startModuleSetting) {
-                    intent.setClass(this, FreedomSettingActivity::class.java)
-                    intent.putExtra("isModuleStart", true)
-                    intent.putExtra("isDark", isDarkMode)
+                    source_intent.removeExtra("startModuleSetting")
+                    val activity = this
+                    val setting_intent = Intent(source_intent).apply {
+                        setClass(activity, FreedomSettingActivity::class.java)
+                        putExtra("isModuleStart", true)
+                        putExtra("isDark", activity.isDarkMode)
+                    }
                     val options = ActivityOptions.makeCustomAnimation(
                         this,
                         android.R.anim.slide_in_left,
                         android.R.anim.slide_out_right
                     )
-                    startActivity(intent, options.toBundle())
+                    startActivity(setting_intent, options.toBundle())
                     finish()
                 }
             }.onFailure {
