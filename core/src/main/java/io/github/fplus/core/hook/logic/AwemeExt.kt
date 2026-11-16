@@ -161,7 +161,7 @@ fun ImageUrlStruct.animatedVideoUrlList(): List<String> {
     val video = video ?: return emptyList()
     return video.findVideoUrlList(
         jsonKeys = listOf("play_addr", "play_addr_h264", "play_addr_265"),
-        legacyNames = listOf("playAddr", "playAddrH264", "playAddrH265"),
+        legacyNames = listOf("playAddr", "h264PlayAddr", "playAddrH264", "playAddrH265"),
     ) ?: emptyList()
 }
 
