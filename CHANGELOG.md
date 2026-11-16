@@ -7,7 +7,7 @@
 
 ---
 
-## 未发布
+## 待发布：PR #3 功能批次
 
 ### 新增
 
@@ -23,6 +23,87 @@
 - **Filtering moved to the feed response callback**: both presenters resolved by DexKit (`recommendFeedFetchPresenter` / `fullFeedFollowFetchPresenter`) expose `onSuccess`, so entries are dropped there — before the adapter is populated, which means no count/index bookkeeping is involved at all. The access path inside the callback is discovered adaptively and cached; if the path, the list or the write is unavailable, or filtering would empty the list, the data is passed through untouched and only one log line is emitted.
 - **设置页重建偶发闪退（`BadParcelableException: ClassNotFoundException androidx.compose.material.DrawerValue`）**：模块设置页跑在抖音进程内，Host 的 `savedInstanceState` 用了抖音（或其插件）的 ClassLoader；Compose 的 `rememberSaveable`（`Scaffold` 默认 `DrawerState`）把模块内的 compose 枚举按 Serializable 写进该 Bundle，重建时宿主 ClassLoader 解析不到，直接抛异常。现在 `BaseActivity.onCreate` 先把 Bundle 的 ClassLoader 换成 `PluginClassloader`（模块优先、宿主兜底）再恢复状态。
 - **HEIF 图像序列的落盘后缀**：抖音部分动图表情下发 `ftyp=msf1` + `hdlr=pict`（`HEIF/ImageSequence`）。现按 `moov/mdia/hdlr` 细分：选「MP4」时仍命名 `.mp4`（与旧版一致，系统相册/多数播放器可播，个别播放器只出首帧）；选「跟随源」或「GIF」时降级 `.heic` 并提示「相册可能仅显示首帧」。
+
+---
+
+## 待发布：PR #4 整合
+
+### 新增
+
+- 实况/动图可选同时保存静态图片和附带短视频；下载及评论设置共用开关，默认关闭，既有用户不自动多下载视频。
+- 多图评论保存当前浏览的图片，兼容直接持有 URL 列表的 ImageUrlStruct 与包裹 UrlModel 的评论图片对象。
+
+### 接收前修复
+
+- 可选页码 Hook 与原有图片观察、保存按钮独立注册；新增类或方法缺失不连带中断旧入口。
+- 评论媒体与页码按浏览器实例绑定，更换评论或图片顺序后重置状态；异常、越界和总数不匹配的页码回到第一张。
+- 图文下载区分完整成功、部分完成和完全失败，分别提示缺失图片、视频；通知与对话框共用下载实现，WebDAV 只处理本次成功文件。
+- 设置入口使用主线程串行与 800ms 单调时钟节流，启动失败可以重试；消费原入口标记后用 Intent 副本跳转。
+- 修正实况视频 H264 旧字段名回退；未知或零文件长度不再触发下载进度除零。
+
+### 验证边界
+
+- 新增纯 JVM 回归覆盖评论状态隔离、媒体反射解析、可选 Hook 失败、设置节流、下载部分失败与进度边界。
+- 本次只整合源码；不推送远端、不安装 APK、不替换既有 1.3.12 发布包。宿主 Fragment 关联、真实翻页及实况保存仍需真机回归。
+
+---
+
+## v1.3.12
+
+### 修复
+
+- 修正发布保留规则，保留 Xposed 从外部调用的 `beforeHookedMethod` 与 `afterHookedMethod`，避免 R8 删除系统侧及应用侧高刷新率回调执行体。
+- 版本号为 `v1.3.12`（versionCode 148）；沿用现有发布签名，运行时 Kotlin / Java 逻辑与 1.3.11 一体版相同。
+
+### 文档与验证
+
+- 发布 DEX、固定签名与源码基准核验通过，42 项核心逻辑测试通过；已有小米设备安装使用反馈确认抖音界面高刷生效。该反馈不等同于新增 ADB 测量、所有 ROM 或重启持久性测试。
+- 按完整功能重写项目首页，并同步发布说明、安装文档、已知限制及验证摘要；纠正 API 24 对应系统版本、适配列表范围与 WebDAV 媒体上传描述。
+- 发布包沿用现有签名与内容；源码归档排除签名密钥、本地口令、SDK 配置、Git 元数据与构建缓存。
+
+---
+
+## v1.3.11
+
+### 新增
+
+- 将小米 PowerKeeper 系统侧高刷处理集成在原 FreedomPlus APK 内，推荐作用域新增 `com.miui.powerkeeper`，无需另装桥接模块。
+- 按包名和进程分流：主抖音保留原初始化；PowerKeeper 主进程只加载系统高刷路径，不运行抖音插件、资源注入、MMKV 或 DexKit。
+- 沿用原高刷开关；首次迁移抖音内既有状态，用受控 ContentProvider 同步开关、初始化标记和修订号。写入失败的待同步标记保存在本地，重启进程后仍可重试。
+- 系统侧只改主抖音、主屏、正常视频 cookie 的正值低刷新率请求；不改 cookie、其它应用、副屏、清除请求、省电或中等以上热限制，不写全局刷新率键。
+
+### 稳定性
+
+- 共享配置读取放到独立线程；变更事件触发同步，正常场景请求按间隔合并补查，不在 PowerKeeper 原策略线程启动外部 Provider。
+- 回放开关变更时核对原 Looper、当前前台包、屏幕状态和当前 cookie，旧请求不能覆盖随后到来的热限制或其它场景。
+- 设置页加载只读取高刷值，不把默认值回写为首次迁移状态；原清空配置操作同步复位共享高刷开关。
+
+### 验证边界
+
+- 系统切入点来自本机 PowerKeeper 4.2.00 的原始 DEX；其它 ROM 若类或字段不匹配，记录日志并保留原策略。
+- 版本号为 `v1.3.11`（versionCode 147）；编译、测试、签名与产物检查结果见本次交付验收报告。
+- 本轮未覆盖安装或重启手机；是否持续达到主屏 120 Hz，需要安装并启用新增作用域后实测。
+
+---
+
+## v1.3.10
+
+### 新增
+
+- **解锁高刷新率（实验）**：设置中增加默认关闭的开关，重启抖音后生效。在当前物理分辨率的支持模式中选择最高有效刷新率，不硬编码 120 Hz；不新增系统作用域、不写全局设置。
+- 独立覆盖窗口参数设置、初始添加与后续布局更新；通过 Activity 恢复和显示变更事件重新请求，不逐帧轮询。
+- Android 11+ 覆盖公开 Java `Surface.setFrameRate` / `SurfaceControl.Transaction.setFrameRate` 重载，上调有效的正值请求，保持暂停清除、非法参数与切换策略不变。不是视频补帧；直接 native 调用和厂商系统限刷仍在作用边界之外。
+- 为模式选择、折叠屏分辨率、多显示器、暂停清除和 API 参数保留新增纯 JVM 回归测试。
+
+### 修复
+
+- Xpler 构建仍引用此前已删除的本地 `api-82.jar`，导致干净工作树编译失败；改为复用版本目录中已声明的 Xposed API 82 编译期依赖。
+
+### 验证状态
+
+- 本次高刷功能尚未真机验证，不能把此前小米设备上的广告/崩溃修复验证迁移为本功能的证据。
+- 实现边界和真机对照流程见[高刷新率说明](<docs/高刷新率.md>)。
+- 版本号升级至 `v1.3.10`（versionCode 146）。
 
 ---
 
@@ -81,7 +162,7 @@
 
 ### 变更
 
-- **移除内置 OTA**：删除对 GitHub API 的远程版本检查与更新提示，模块不再发起任何对外网络请求。「检查更新」按钮保留，行为改为展示随包分发的本地更新日志。
+- **移除内置 OTA**：删除对 GitHub API 的远程版本检查与更新提示。「检查更新」按钮保留，行为改为展示随包分发的本地更新日志；媒体下载、WebDAV 上传和属地查询仍按对应功能需要联网。
 - **首页「源码地址」与「问题反馈」指向本仓库**，不再指向上游仓库。
 - **签名配置外部化**：工程内不再包含任何密钥文件，release 签名改由 `keystore.properties` 提供（见 [docs/构建.md](docs/构建.md)）。
 

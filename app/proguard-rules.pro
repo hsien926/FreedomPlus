@@ -88,3 +88,11 @@
 
 # 模块状态
 -keep class io.github.fplus.HookInit
+-keep class io.github.fplus.core.config.HighRefreshProvider { *; }
+
+# Xposed 在宿主进程从外部调用这些回调；不能按普通引用分析删除。
+# 不限制访问级别，兼容 protected 直接回调与 public Xpler 适配器。
+-keepclassmembers class * {
+    void beforeHookedMethod(de.robv.android.xposed.XC_MethodHook$MethodHookParam);
+    void afterHookedMethod(de.robv.android.xposed.XC_MethodHook$MethodHookParam);
+}

@@ -15,7 +15,7 @@
 | 上游基座 | [xiaodesetingyongzhanghao/FreedomPlus](https://github.com/xiaodesetingyongzhanghao/FreedomPlus) | 本项目的起点。工程结构、`app` / `core` / `aweme` 三模块划分、混淆字典 `app/dic.txt`、模块配置与设置界面均继承自此处 |
 | 上游演进版本 | [FairyWorld/lsposed_FreedomPlus](https://github.com/FairyWorld/lsposed_FreedomPlus) | 本项目 `core` 模块下的 hook 实现与资源文件与之同源：**168 个文件内容逐字节相同**，另在 16 个文件上做了修改、新增 6 个 hook 类 |
 | 工具库 | [GangJust/ktutils](https://github.com/GangJust/ktutils) | `ktutils/` 目录，**80 个文件逐字节相同**，未做修改。包名保持上游的 `com.freegang.ktutils` 不变，以便与上游持续同步 |
-| 框架封装 | [ThatWorld/xpler](https://github.com/ThatWorld/xpler) | `xpler/` 目录，34 个文件中的 33 个与上游相同，仅对 `build.gradle.kts` 做了本地化调整（移除发布与签名插件） |
+| 框架封装 | [ThatWorld/xpler](https://github.com/ThatWorld/xpler) | `xpler/` 目录，34 个文件中的 33 个与上游相同，仅对 `build.gradle.kts` 做本地化调整：移除发布与签名插件，并复用 Xposed API 82 编译期依赖 |
 
 > 上述两个目录在本仓库中以**普通目录**形式纳入版本控制（非 git submodule），以便 `git clone` 后即可直接构建。
 
@@ -27,10 +27,19 @@
 
 - `core` 模块新增广告拦截与信息流拦截相关 hook（`HAdBlock`、`HFeedAdFilter` 等）；
 - 抖音 40.6.0 适配：崩溃修复、DexKit matcher 修正、混淆名漂移兼容；
-- 移除内置 OTA，模块不再发起任何对外网络请求；
+- 移除内置 OTA，不再后台检查远程版本；媒体下载、WebDAV 上传与属地查询仍按对应功能需要联网；
 - 构建体系整理：签名配置外部化、依赖版本对齐。
 
-## 三、第三方依赖许可
+## 三、高刷新率功能参考
+
+v1.3.10 的应用进程内高刷机制参考：
+
+- [Lost Xposed / DisplayProfilesFeature](<https://github.com/uraniam9/lost-xposed/blob/709069c888e7ad90a506036ebcb986396a919adb/lostxposed/features/displayprofiles/src/main/kotlin/dev/lostxposed/features/displayprofiles/DisplayProfilesFeature.kt>)，作者 uraniam9，项目许可 GPL-3.0-or-later。本次核验提交为 `709069c888e7ad90a506036ebcb986396a919adb`；参考其逐应用窗口刷新率思路，未移植其 libxposed 引擎、配置传输或界面。
+- [Android 帧率 API 官方说明](<https://developer.android.com/media/optimize/performance/frame-rate>)，用于核验窗口与 Surface 投票、0 清除意图、切换策略及实际刷新率的区别。
+- 基于这些接口机制新增独立实现，补齐后续窗口更新、显示变更与公开 Java Surface 请求处理。没有增加第三方运行时库；JUnit 4.13.2 仅用于本地回归测试，不随 APK 分发。
+- v1.3.11 的 PowerKeeper 系统侧切入点来自本机 PowerKeeper 4.2.00 APK 的原始 DEX 指令与字段核验；共享开关、受控 ContentProvider 和场景回放保护为本次独立实现，没有移植其它系统模块的代码或引入额外运行时库。
+
+## 四、第三方依赖许可
 
 | 依赖 | 版本 | 许可 | 说明 |
 |---|---|---|---|
@@ -41,12 +50,12 @@
 | Kotlin 标准库与协程 | 1.8.10 | Apache-2.0 | 语言运行时 |
 | [Xposed API](https://github.com/LSPosed/LSPosed) | 82 | Apache-2.0 | **仅编译期依赖**（`compileOnly`），不随包分发 |
 
-## 四、关于抖音内部类的类型声明
+## 五、关于抖音内部类的类型声明
 
 `aweme/` 模块是一个 `compileOnly` 的**类型声明壳**：它只声明抖音内部类与原方法的签名（字段类型、方法返回类型），供编译期引用，自身不打包进 APK、运行时由抖音提供。
 
 这样做是为了避免在 hook 代码里使用硬编码的类名与方法签名。声明内容为**接口最小必要的签名信息**，不含抖音的任何实现代码。
 
-## 五、分发说明
+## 六、分发说明
 
 本项目以源码形式在 GitHub 公开，按 GPL-3.0 第 5 条分发。任何基于本项目的衍生作品同样需要以 GPL-3.0 分发，并保留本文件与 LICENSE 中的来源与版权声明。

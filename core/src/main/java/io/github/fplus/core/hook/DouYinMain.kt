@@ -50,6 +50,9 @@ class DouYinMain(private val app: Application) {
             intent.setClassName(Constant.modulePackage, className)
             KAppCrashUtils.init(app, "抖音异常退出!", intent)
 
+            // 高刷功能独立于抖音混淆类与 DexKit 结果。
+            HHighRefreshRate(app).install()
+
             // 定时退出
             initTimedShutdown(app)
 

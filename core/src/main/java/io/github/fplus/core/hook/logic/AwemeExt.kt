@@ -150,6 +150,21 @@ fun Aweme.getImageUrlList(): List<ImageUrlStruct> {
     return images ?: return emptyList()
 }
 
+/**
+ * 图文动图的视频地址（空 = 静态图）。
+ *
+ * 图文动图在数据层是「静态图 + 一段短视频」：`ImageUrlStruct.video` 非空即动图
+ * （旁边还有 `imgDuration`、`livePhotoType` 佐证）。该字段名未混淆，
+ * 39.9.0（jadx）与 40.8.0（MT）都确认存在。
+ */
+fun ImageUrlStruct.animatedVideoUrlList(): List<String> {
+    val video = video ?: return emptyList()
+    return video.findVideoUrlList(
+        jsonKeys = listOf("play_addr", "play_addr_h264", "play_addr_265"),
+        legacyNames = listOf("playAddr", "h264PlayAddr", "playAddrH264", "playAddrH265"),
+    ) ?: emptyList()
+}
+
 fun Aweme.getMusicUrlList(): List<String> {
     val music = music ?: return emptyList()
     return music.playUrl?.urlList ?: emptyList()

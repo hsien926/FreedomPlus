@@ -292,6 +292,7 @@ class FreedomSettingActivity : XplerActivity() {
             item { NeatModeItem() }
             item { LongPressSettingItem() }
             item { AutoPlayItem() }
+            item { HighRefreshRateItem() }
             item { ImmersiveItem() }
             item { CommentColorModeItem() }
             item { WebDavItem() }
@@ -395,6 +396,13 @@ class FreedomSettingActivity : XplerActivity() {
                         }
                     )
                     CheckBoxItem(
+                        text = "实况/动图保存视频",
+                        checked = model.isLivePhotoVideo.observeAsState(false),
+                        onCheckedChange = {
+                            model.setLivePhotoVideo(it)
+                        }
+                    )
+                    CheckBoxItem(
                         text = "“分享->复制链接”弹出下载",
                         checked = model.isCopyDownload.observeAsState(false),
                         onCheckedChange = {
@@ -464,6 +472,13 @@ class FreedomSettingActivity : XplerActivity() {
                         checked = model.isVibrate.observeAsState(false),
                         onCheckedChange = {
                             model.setVibrate(it)
+                        }
+                    )
+                    CheckBoxItem(
+                        text = "实况/动图保存视频",
+                        checked = model.isLivePhotoVideo.observeAsState(false),
+                        onCheckedChange = {
+                            model.setLivePhotoVideo(it)
                         }
                     )
                 }
@@ -1540,6 +1555,22 @@ class FreedomSettingActivity : XplerActivity() {
                 }
             }
         }
+    }
+
+    @Composable
+    private fun HighRefreshRateItem() {
+        val checked = model.isHighRefreshRate.observeAsState(false)
+        val change: (Boolean) -> Unit = {
+            model.changeIsHighRefreshRate(it)
+            showRestartAppDialog.value = true
+        }
+        SwitchItem(
+            text = "解锁高刷新率（实验）",
+            subtext = "请求主屏最高刷新率，非视频补帧；小米需勾选电量与性能作用域。更改后重启抖音，首次启用系统作用域需重载对应进程",
+            checked = checked,
+            onClick = { change(!checked.value) },
+            onCheckedChange = change,
+        )
     }
 
     @Composable

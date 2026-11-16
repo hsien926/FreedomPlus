@@ -1,195 +1,219 @@
 # FreedomPlus
 
-> 抖音去广告与功能增强的 Xposed / LSPosed 模块，开源、无广告、不联网上传任何数据。
+**抖音功能增强模块 · Xposed / LSPosed · 当前版本 v1.3.12（148）**
 
-[![GitHub release](https://img.shields.io/github/v/release/hsien926/FreedomPlus?display_name=release)](https://github.com/hsien926/FreedomPlus/releases)
-[![Build](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml/badge.svg)](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Android%208.0%2B%20(API%2024%2B)-green)]()
+[![版本](https://img.shields.io/github/v/release/hsien926/FreedomPlus?display_name=release)](https://github.com/hsien926/FreedomPlus/releases)
+[![构建](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml/badge.svg)](https://github.com/hsien926/FreedomPlus/actions/workflows/build.yml)
+[![许可](https://img.shields.io/badge/license-GPL--3.0-blue)](<LICENSE>)
+[![Android](https://img.shields.io/badge/Android-7.0%2B%20%2F%20API%2024%2B-green)](#环境与适配)
 
----
+FreedomPlus 为抖音提供广告拦截、视频与图文下载、界面精简、清爽与沉浸播放、交互调整、定时退出、WebDAV 媒体上传和高刷新率支持。模块自身不展示广告，已移除内置远程更新检查；媒体下载、WebDAV 和属地查询仍按对应功能需要联网。
 
-## 关于本项目
+本项目基于 [xiaodesetingyongzhanghao/FreedomPlus](https://github.com/xiaodesetingyongzhanghao/FreedomPlus) 二次修改维护，保留原项目来源与 GPL-3.0 许可。来源、参考实现与第三方依赖见[来源与许可说明](<NOTICE.md>)。
 
-本项目是**基于 [xiaodesetingyongzhanghao/FreedomPlus](https://github.com/xiaodesetingyongzhanghao/FreedomPlus) 进行二次修改更新**的衍生版本，在其基础上完成了抖音 40.x 版本的适配、广告拦截能力的重构与扩充，以及一批真机验证中发现的问题修复。
+**快速入口：** [下载发布包](https://github.com/hsien926/FreedomPlus/releases/latest) · [本版发布说明](<docs/发布说明-v1.3.12.md>) · [安装与激活](<docs/安装与激活.md>) · [高刷新率说明](<docs/高刷新率.md>) · [已知限制](<docs/已知限制.md>) · [更新日志](<CHANGELOG.md>) · [问题反馈](https://github.com/hsien926/FreedomPlus/issues)
 
-本版本相对基座的实质性改动：
+## v1.3.12 的重点
 
-- **新增广告拦截** —— 小程序广告、小游戏广告、激励视频、插屏四类广告的拦截链路，全部改用运行时反射定位目标类与方法，不写死任何混淆类名；
-- **新增信息流广告拦截** —— 在 `VideoViewHolder.bind` 入口阻断广告项绑定（**注意：本机未观察到信息流广告投放，该功能尚未取得生效证据，详见[已知限制](docs/已知限制.md)**）；
-- **抖音 40.6.0 适配** —— 修复模块导致抖音启动即崩溃的问题，DexKit matcher 命中数从 7 提升到 18；
-- **移除内置 OTA** —— 模块不再发起任何对外网络请求，「检查更新」退化为读取随包分发的本地更新日志。
+- **修复发布包高刷回调被 R8 裁剪**：保留 Xposed 外部调用的 `beforeHookedMethod` / `afterHookedMethod`，应用侧与系统侧高刷执行体已在 Release APK 中核对。
+- **应用侧与小米系统侧一体化**：沿用 v1.3.11 的双进程实现，一个 APK、同一个高刷开关，无需另装桥接模块。
+- **保持原有配置与固定签名**：升级首次迁移主抖音内的既有高刷状态，同签名发布包可覆盖安装。
+- **验证分开记录**：42 项核心逻辑测试及发布签名 / 回调检查通过；已有小米设备使用反馈确认抖音界面高刷生效，不等于所有 ROM 或重启持久性已验证。
 
-详细的代码来源与依赖许可见 [NOTICE.md](NOTICE.md)。
+以下是当前版本的完整功能说明，不将继承功能全部算作本版新增，也不将保留设置项等同于所有抖音版本均可用。
 
-**声明**：本项目是独立维护的衍生版本，与上述基座仓库的维护者无隶属关系。
+## 完整功能
 
----
+### 1. 广告拦截与内容过滤
 
-## 功能
-
-### 广告拦截
-
-- 小程序 / 小游戏广告拦截
-- 激励视频广告拦截
-- 插屏广告拦截
-- 信息流广告拦截（实验性，未取得生效证据）
-
-### 下载与保存
-
-- 视频无水印下载
-- 评论区视频 / 图片保存
-- 表情包保存
-- 语音评论保存
-- 视频下载自定义编码格式与自定义文件名
-- 复制链接下载弹窗
-
-### 界面增强
-
-- 首页控件半透明（防烧屏）
-- 首页清爽模式，隐藏大部分控件
-- 顶部 Tab 栏自定义隐藏
-- 底部 Tab 栏自定义隐藏
-- 移除底部加号按钮
-- 视频右侧控件自定义隐藏
-- 沉浸式全屏播放
-
-### 使用体验
-
-- 聊天消息防撤回
-- 禁用双击点赞 / 双击打开评论区
-- 长按抖音上半部分唤起模块设置（可关闭）
-- 视频过滤（直播、广告、长视频、文案关键字、弹窗关键字等）
-- 自动连播
-- 定时退出 / 空闲退出
-- WebDAV 备份与恢复模块配置
-
-完整的逐版本变更见 [CHANGELOG.md](CHANGELOG.md)。
-
----
-
-## 安装
-
-### 前置条件
-
-- 已 root 并安装 **LSPosed**（其他 Xposed 框架自测；本项目在 LSPosed 上验证）
-- 抖音 **64 位**版本（网络上流传的历史版本大多为 32 位，32 位下模块不稳定）
-- Android 8.0 及以上（`minSdk 24`）
-
-### 步骤
-
-1. 从 [Releases](https://github.com/hsien926/FreedomPlus/releases) 下载 `FreedomPlus-1.3.8-release.apk` 并安装；
-2. 打开 LSPosed，在「模块」中启用 **FreedomPlus**；
-3. 在作用域中勾选**抖音**（`com.ss.android.ugc.aweme`，极速版 / 火山版为独立包名，需另行勾选）；
-4. 给抖音授予**文件读写权限** —— 模块需要该权限读取配置与写入下载文件；
-5. 强制停止抖音后重新打开。
-
-> **升级安装提示**：本项目的 APK 使用固定签名。一旦你安装过本项目的历史版本，后续版本可直接覆盖安装、配置不丢失。如果你之前装的是其它来源的 FreedomPlus，由于签名不同，覆盖安装会被系统拒绝，需要先卸载旧版。
-
-### 验证模块是否生效
-
-打开 FreedomPlus 应用，首页「模块状态」应显示 `LSPosed加载成功!`，下方会同时显示本机抖音版本号与适配结论。
-
-若显示「加载失败」，依次检查：LSPosed 中作用域是否勾选抖音 → 抖音是否已强制停止重启 → 是否使用了 64 位抖音。
-
----
-
-## 适配版本
-
-| 项 | 说明 |
+| 功能 | 说明 |
 |---|---|
-| 实测基准 | 抖音 **40.6.0**（小米 M2102K1C / Android 17） |
-| 已验证版本 | 抖音 **31.7.1 (310702)**、**31.7.2 (310703)**、**38.6.0 (380600)** |
-| 声明适配 | 抖音 **28.0.0 ~ 40.6.0** |
-| 配置依据 | 随包分发的 `assets/versions.json` |
+| 广告拦截总开关 | 新装默认开启，可在模块设置中关闭 |
+| 小程序 / 小游戏广告 | 按 SDK 广告类型拦截激励、插屏、横幅、信息流、开屏与贴片等请求；开屏指对应 SDK 类型，不是所有抖音启动广告的拦截保证 |
+| 插屏广告 | 阻断目标创建链路，在匹配到回调接口时通知加载失败 |
+| 激励视频 | 缩短目标链路的本地计时与关闭等待，保留原有奖励处理流程；实际发放取决于目标业务返回结果 |
+| 信息流广告（实验） | 数据落表阶段剔除广告，普通 / 可玩 / 互动可玩 ViewHolder 绑定阶段补充拦截；仅绑定拦截的条目可能留下空白页 |
+| 视频过滤（版本相关） | 保留直播、广告、图文、长视频、推荐卡片、推荐商家、空文案和自定义文案关键字规则；40.6.0 下非广告过滤的旧入口缺失 |
+| 弹窗过滤 | 按弹窗文本关键字关闭目标弹窗，可选显示关闭提示 |
+
+信息流广告尚无实际投放下的拦截成功证据，部分小程序 / 小游戏展示入口也随版本变化而失效。详见[广告与过滤边界](<docs/已知限制.md>)。
+
+### 2. 下载与保存
+
+- **视频、图文图片、背景音乐下载**：获取对应播放源或媒体地址并保存到本地。
+- **播放地址编码优先级**：提供 `Auto`、`H264`、`H265` 选择；地址缺失时按已有降级链处理，不对视频重新编码。
+- **自定义文件名**，以及**按创作者单独建立文件夹**。
+- **下载进度**：可选择弹窗或通知栏展示。
+- **复制链接唤起下载**：可开启“分享 → 复制链接”弹出下载选择，沿用全屏播放场景的处理。
+- **作品文案复制**：在下载选择弹窗中复制当前文案。
+- **评论区图片 / 视频保存**，以及**表情包 / 相关表情保存**。
+- **VVIC / HEIC 图文兼容**：识别部分 HEIF 内容，调用抖音内置解码器转为 JPEG；解码器缺失或解码失败时不保证转换成功。
+- **保存后刷新媒体库**，支持相关保存操作的可选震动反馈。
+
+默认下载目录为外置存储器 `Download/Freedom`，视频、图片、音乐、表情等按类型分类。语音评论保存工具目前只有保留代码，没有接入可触发入口，不列为已可用功能。
+
+### 3. 界面精简与外观
+
+- **首页控件半透明**：顶部导航、视频控件、右侧控件、底部导航分别提供 `0–100` 调整值；右侧值受整体视频控件值约束。
+- **顶部标签隐藏**：按关键字隐藏顶部选项；开启后会限制左右滑动切换。
+- **底部标签隐藏**：按关键字隐藏底部选项。
+- **底部加号按钮处理**：保留拍摄、禁止拍摄或移除按钮。底部隐藏关键字包含“拍摄”时，会直接隐藏拍摄按钮。
+- **右侧控件隐藏**：按类型或文本关键字处理头像、喜欢、评论、收藏、分享、少推荐、音乐等控件。
+- **移除悬浮挑战 / 评论贴纸**。
+- **底部播放控制栏移除（旧版相关）**：保留针对单一控制栏容器的设置，40.6.0 下已不适用。
+- **评论区颜色模式**：浅色、深色或跟随主题，保留评论区展开后的搜索入口精简处理。
+
+### 4. 清爽模式与沉浸播放
+
+- **清爽模式**：隐藏主要视频控件与首页顶、底部控件；暂停视频时恢复相关控件。
+- **长按菜单**：清爽 / 普通模式切换、评论、收藏、分享、下载、视频信息、模块设置；项目按已启用功能显示。
+- **上半屏 / 下半屏响应选择**：上半屏已用于模块设置时，清爽菜单改由下半屏响应，避免两个入口同时触发。
+- **视频信息查询**：查看作品发布时间与属地；属地需要联网，接口异常时显示获取失败。
+- **全屏沉浸**：分别选择隐藏状态栏、导航栏，保留横屏播放的独立沉浸处理。部分作品可能出现裁切或拉伸。
+
+### 5. 播放、手势与消息
+
+- **自动连播**：沿用抖音连播能力，可增加首页连播按钮、设置启动时默认开启。
+- **双击响应类型（版本相关）**：打开评论或点赞视频。40.6.0 下旧双击拦截入口未命中，不保证切换后能阻止原生点赞。
+- **手势误触复确认**：底部首页、头像关注等目标操作增加确认弹窗。
+- **长视频时长提示**：达到 10 分钟阈值的视频显示时长提醒。
+- **消息防撤回（保留项）**：保留防撤回及“保留自己撤回的消息”设置。设置页已标注“失效不修”；不恢复已被服务端替换的内容，不宣称本版恢复全版本可用性。
+
+### 6. 高刷新率（实验）
+
+**同一个开关控制应用侧与小米 PowerKeeper 系统侧，新装默认关闭。**
+
+| 路径 | 处理范围 |
+|---|---|
+| 应用侧 | 窗口模式请求、Activity 恢复 / 显示变更，以及 Android 11+ 公开 Java Surface 帧率请求 |
+| 小米系统侧 | 主抖音、默认主屏、正常视频场景的有效低刷新率请求；需启用“电量与性能”作用域 |
+| 开关同步 | 首次迁移主抖音已有状态；共享状态初始化后不被旧本地值重复覆盖，写入失败保留待同步状态 |
+
+- 在当前物理分辨率下请求屏幕支持的最高有效刷新率，不硬编码 120 Hz。
+- 不改其它应用、副屏、其它场景请求或全局刷新率键。
+- 不禁用 PowerKeeper、Joyose、温控服务；保留省电、中等及以上热状态限制、用户上限和其它系统投票。
+- **不是视频补帧**：不改变源帧数、时间戳或播放速度。屏幕高刷不等于每条视频都产生相同数量的不同画面。
+- 系统侧切入点依据已核对的 PowerKeeper `4.2.00`；其它 ROM 不匹配时记录日志并保留原策略。
+
+启用、关闭、作用域重载、共享开关机制及真机对照方法见[高刷新率详细说明](<docs/高刷新率.md>)。
+
+### 7. 定时退出与 WebDAV
+
+- **运行退出 / 空闲退出**：分别设置分钟数，低于 3 分钟的对应计时不执行。
+- **保留应用后台**：将退出行为改为切换后台；保留直播间暂停空闲计时的处理。
+- **WebDAV 媒体上传**：在下载弹窗选择下载并上传视频、图片或背景音乐，沿用分类目录。
+- **WebDAV 多配置**：连接测试、保存历史、选择与删除历史配置。
+
+**WebDAV 当前用于媒体文件上传，不是模块配置备份与恢复。**
+
+### 8. 模块入口与管理
+
+- **长按视频上半屏打开模块设置**：默认开启，避开左右边缘长按快进区域，可关闭。
+- **模块应用入口**：查看框架加载状态、抖音版本与本地适配提示，并跳转设置。
+- **旧侧边栏 / 加号弹窗入口**：保留实现，是否出现取决于目标版本对应界面是否仍存在。
+- **桌面图标显示 / 隐藏**。
+- **查看本地更新日志、类匹配日志**，清除 DexKit 缓存后重新定位。
+- **旧下载目录迁移**：将旧 `DCIM/Freedom` 迁移至 `Download/Freedom`。
+- **清空本地数据**：模块首页的清空操作会同时清除配置与下载内容，并复位共享高刷开关；不是普通升级步骤。
+- **离线版本提示**：更新日志和适配列表随包分发，不后台检查远程更新。
+
+## 安装与启用
+
+1. 从 [GitHub Releases](https://github.com/hsien926/FreedomPlus/releases/latest) 下载 **Release APK** 并安装。
+2. 在 LSPosed 中启用 FreedomPlus，勾选主抖音 `com.ss.android.ugc.aweme`。
+3. 小米系统侧高刷另勾选 **电量与性能** `com.miui.powerkeeper`，无需另装桥接模块。
+4. 打开一次 FreedomPlus；按系统版本为保存媒体授予相应文件 / 存储权限。
+5. **强制停止并重新打开抖音**，长按视频上半屏进入模块设置，按需启用功能。
+6. 更改高刷开关后重启抖音。首次追加 PowerKeeper 作用域还需重载其主进程；整机重启可重载全部相关进程，只重开抖音不会使已运行的 PowerKeeper 加载新 Hook。
+
+同签名旧版可以覆盖安装并保留配置；其它来源若签名不同，不能直接覆盖。Debug 使用不同签名，不用于覆盖已安装的 Release。不要用“清空下载目录”代替升级，该操作也会清除配置。
+
+详细步骤、权限说明、菜单入口与排查方法见[安装与激活](<docs/安装与激活.md>)。
+
+## 环境与适配
+
+| 项目 | 当前说明 |
+|---|---|
+| 框架基准 | Root + LSPosed；其它 Xposed 框架未作完整验证 |
+| 已验证版本 | 抖音 **31.7.1 (310702)**、**31.7.2 (310703)**、**38.6.0 (380600)**；均为出厂预装包，非商店正式版 |
+| 抖音架构 | 以 64 位主抖音为基准，32 位不作兼容保证 |
+| 最低构建要求 | Android 7.0 / API 24；不代表每项功能均已在该系统版本测试 |
+| Java Surface 高刷处理 | Android 11 及以上 |
+| 包内适配列表 | `28.0.0–28.9.0`、`29.0.0–29.9.0`、`30.0.0–30.3.0` 中列出的版本及 `40.6.0` |
+| 40.x 修复记录 | 保留 40.6.0 启动与下载适配、40.8.0 PagerAdapter 数量失配修复；不是全功能回归承诺 |
+| 系统高刷基准 | 小米 PowerKeeper `4.2.00`，已有界面高刷生效反馈；未覆盖所有 ROM 或重启持久性 |
+| 极速版 / 火山版 | 保留原加载规则，未完成完整功能验证，也不使用主抖音的共享系统高刷开关 |
+
+包内列表见[适配版本数据](<app/src/main/assets/versions.json>)。“版本功能正常”只表示本机版本命中该列表，不是每项功能均通过测试。**没有 28.0.0 到 40.6.0 全区间连续适配承诺。**
 
 > **关于验证包**：31.7.x 与 38.6.0 都不是应用商店下载的正式版，而是**手机出厂预装**的抖音 —— 31.7.2 为 Xiaomi 17 出厂版本，38.6.0 为 OPPO Find X10 Pro Max 出厂版本。安装包分别约 **140MB** 与 **160MB**，明显小于商店正式版（40.x 约 300MB 量级）。出厂包剔除了部分在线模块（例如搜索、本地生活被拆成插件），组件更少，但信息流与广告相关的类结构一致，因此同样可作为验证基准。
 
-> **v1.3.9 真机验证说明**：PagerAdapter 崩溃修复已在**小米手机**完成真机验证。其他品牌手机的系统实现、权限策略和厂商定制可能不同，需自行测试。
+### 已知边界
 
-抖音会持续重命名与混淆内部类。本项目的定位策略以**未混淆的类、方法、字段**为锚点（例如 `Aweme.isAd`、`BaseAd.adParser`），并借助 [DexKit](https://github.com/LuckyPray/DexKit) 做特征匹配，因此在混淆名漂移时具备一定自愈能力；但锚点本身被移除时相关功能会静默失效并记录日志。
+- 信息流广告暂无真实投放下的成功拦截证据，部分仅绑定拦截路径可能产生空白页。
+- 40.6.0 下旧推荐 / 关注过滤入口缺失；新广告方案不代表直播、图文、文案等非广告过滤已恢复。
+- 底部旧控制栏容器、旧双击拦截入口和部分旧设置入口随版本变化而不可用。
+- 消息防撤回为保留项；语音评论保存没有接入入口；“崩溃容错 / 去插件化”设置处于暂存区，当前页面不展示。
+- 高刷仍受系统约束；直接 native 帧率请求及其它 ROM 私有策略不在新增保证范围内。
 
-**遇到问题时请先查阅 [已知限制](docs/已知限制.md)**，其中逐条列出了各版本已确认失效或未验证的功能及其归因。
+详细归因见[已知限制](<docs/已知限制.md>)，高刷检查口径见[高刷新率说明](<docs/高刷新率.md>)。
 
----
+## 权限与网络行为
 
-## 构建
+| 权限 / 行为 | 用途 |
+|---|---|
+| 文件 / 存储访问 | 保存下载媒体、管理下载目录；具体授权入口由 Android 与目标应用权限策略决定 |
+| `QUERY_ALL_PACKAGES` | 检测抖音是否安装及本机版本，用于适配提示 |
+| `INTERNET` | 模块应用中的 WebDAV 连接；注入抖音后的媒体下载、WebDAV 上传及属地查询使用宿主网络环境 |
+| `VIBRATE` | 相关保存操作的可选震动反馈 |
+| 本地配置 | 主要保存在目标应用私有目录；高刷提供方仅共享初始化状态、开关和修订号 |
+| 更新检查 | OTA 已移除，更新日志与适配列表仅读取本地副本 |
 
-环境要求与完整步骤见 [docs/构建.md](docs/构建.md)。最短路径：
+当前实现没有增加账号数据、下载记录或运行日志的自动遥测上传；选择 WebDAV 选项时会将媒体上传到所配置服务器，属地查询会请求对应网络接口。不能把“移除 OTA”解释成“完全不联网”。
+
+## 从源码构建
+
+工程使用 **JDK 17、Android SDK 34、Gradle Wrapper 8.9**。`ktutils` 与 `xpler` 作为普通目录纳入仓库，不需要额外初始化 Git 子模块。
 
 ```bash
 git clone https://github.com/hsien926/FreedomPlus.git
 cd FreedomPlus
-
-# 安装 JDK 17 与 Android SDK（需包含 platforms;android-34）
-export JAVA_HOME=/path/to/jdk-17
-export ANDROID_HOME=/path/to/android-sdk
-
-# 调试包
-./gradlew assembleDebug
-
-# 发布包（需先配置 keystore.properties，见构建文档）
-./gradlew assembleRelease
+./gradlew :core:testDebugUnitTest :app:assembleDebug
 ```
 
-Windows 下请使用 `gradlew.bat`。
+Windows 使用：
 
----
-
-## 权限说明
-
-| 权限 | 用途 |
-|---|---|
-| `MANAGE_EXTERNAL_STORAGE` / `READ|WRITE_EXTERNAL_STORAGE` | 读写模块配置、保存下载的视频与图片 |
-| `QUERY_ALL_PACKAGES` | 检测抖音是否安装及其版本号，用于适配提示 |
-| `INTERNET` | WebDAV 备份功能；**模块本身不会向任何服务器上报数据** |
-| `VIBRATE` | 下载完成等操作的可选震动反馈 |
-
-模块的运行状态、hook 命中情况只写入本机 logcat（TAG 为 `Freedom+`），不落盘、不外传。
-
----
-
-## 开源库
-
-本项目依赖以下开源库，在此致谢：
-
-- [DexKit](https://github.com/LuckyPray/DexKit) —— 运行时按特征定位混淆类
-- [MMKV](https://github.com/Tencent/MMKV) —— 键值存储
-- [sardine-android](https://github.com/thegrizzlylabs/sardine-android) —— WebDAV 客户端
-- [Xpler](https://github.com/ThatWorld/xpler) —— Kotlin 风格的 Xposed 封装
-- [ktutils](https://github.com/GangJust/ktutils) —— Kotlin 工具库
-
-各依赖的许可条款见 [NOTICE.md](NOTICE.md)。
-
----
-
-## 重要说明
-
-- 本项目代码开源，供开发者学习参考使用；
-- 欢迎 issues 与 pull requests；
-- 请遵守开源协议复制与修改本项目代码，并在衍生作品中保留许可与来源说明；
-- 若认为本项目内容存在不当之处，请通过 [Issues](https://github.com/hsien926/FreedomPlus/issues) 联系。
-
----
-
-## License
-
-[GPL-3.0](./LICENSE)
-
+```powershell
+.\gradlew.bat :core:testDebugUnitTest :app:assembleDebug
 ```
-Copyright (C) 2023 Gang
-Copyright (C) 2026 hsien926
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+本版本包含 **42 项核心逻辑测试**，覆盖模式选择、Surface 参数、高刷开关同步与系统场景策略。测试通过不替代各机型真机检查，完整 Lint 状态也与这些测试分开记录。
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
+Release 构建需要自行配置签名。仓库不包含签名密钥、口令或本地 SDK 配置；自己的签名包不能直接覆盖官方 Release。环境与签名步骤见[构建指南](<docs/构建.md>)。
 
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+## 发布文件与校验
+
+[发布页](https://github.com/hsien926/FreedomPlus/releases/latest) 提供日常安装的 Release APK、调试 APK 与对应源码 ZIP。版本为 **1.3.12 / 148**，包名 **io.github.fplus**。
+
+Release APK SHA-256：
+
+```text
+ff06bdbc260262aaf0ed48ade18ffe3a0e2b593417b5d2a7f33f7b5da53fc304
 ```
+
+发布证书 SHA-256：
+
+```text
+d95f4b5986005e90e98a074ac4c918ccd63af338202bbfd81d8e0607b67d8874
+```
+
+公开验证摘要见[本版验证记录](<docs/验证记录-v1.3.12.md>)。发现问题时，在 [Issues](https://github.com/hsien926/FreedomPlus/issues) 附上抖音版本、设备 / 系统版本、已启用功能、复现步骤及必要的已脱敏日志。
+
+## 来源、依赖与许可
+
+- 上游基座：[xiaodesetingyongzhanghao/FreedomPlus](https://github.com/xiaodesetingyongzhanghao/FreedomPlus)。
+- 运行时定位与配置：[DexKit](https://github.com/LuckyPray/DexKit)、[MMKV](https://github.com/Tencent/MMKV)。
+- 框架封装与工具：[Xpler](https://github.com/ThatWorld/xpler)、[ktutils](https://github.com/GangJust/ktutils)。
+- WebDAV 客户端：[sardine-android](https://github.com/thegrizzlylabs/sardine-android)。
+
+完整谱系、参考实现和各依赖许可见[NOTICE](<NOTICE.md>)。本项目采用 [GPL-3.0](<LICENSE>)，保留原始版权与来源说明。
