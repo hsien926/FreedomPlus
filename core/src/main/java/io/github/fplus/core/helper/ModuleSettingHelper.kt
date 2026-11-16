@@ -1,8 +1,13 @@
+// Kotlin · ModuleSettingHelper.kt · Android 7+ / Xposed · 模块设置入口
 package io.github.fplus.core.helper
 
+import android.app.Activity
 import android.app.ActivityOptions
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import com.freegang.extension.isDarkMode
 import com.freegang.ktutils.app.KAppUtils
 import com.freegang.ktutils.app.KToastUtils
@@ -21,15 +26,13 @@ import io.github.fplus.core.ui.activity.FreedomSettingActivity
 object ModuleSettingHelper {
     private const val MODULE_MAIN_ACTIVITY = "io.github.fplus.activity.MainActivity"
 
-    /** 防抖：一次手势/一次点击只拉起一个设置页（否则会叠两个，返回要按两次） */
-    @Volatile
-    private var lastOpenAt = 0L
+    private val open_gate = MonotonicOpenGate()
 
     fun open(context: Context) {
-        val now = System.currentTimeMillis()
-        if (now - lastOpenAt < 800L) return
-        lastOpenAt = now
-
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            Handler(Looper.getMainLooper()).post { open(context) }
+            return
+        }
         val intent = Intent()
         if (ConfigV1.get().isDisablePlugin) {
             if (!KAppUtils.isAppInstalled(context, Constant.modulePackage)) {
@@ -37,17 +40,22 @@ object ModuleSettingHelper {
                 return
             }
             intent.setClassName(Constant.modulePackage, MODULE_MAIN_ACTIVITY)
-            KToastUtils.show(context, "若设置未生效请尝试重启抖音!")
         } else {
             intent.setClass(context, FreedomSettingActivity::class.java)
         }
-
-        intent.putExtra("isDark", context.isDarkMode)
-        val options = ActivityOptions.makeCustomAnimation(
-            context,
-            android.R.anim.slide_in_left,
-            android.R.anim.slide_out_right
-        )
-        context.startActivity(intent, options.toBundle())
+        val now = SystemClock.elapsedRealtime()
+        if (!open_gate.try_acquire(now)) return
+        try {
+            intent.putExtra("isDark", context.isDarkMode)
+            if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val options = ActivityOptions.makeCustomAnimation(
+                context, android.R.anim.slide_in_left, android.R.anim.slide_out_right,
+            )
+            context.startActivity(intent, options.toBundle())
+            if (ConfigV1.get().isDisablePlugin) KToastUtils.show(context, "若设置未生效请尝试重启抖音!")
+        } catch (error: Exception) {
+            open_gate.release(now)
+            throw error
+        }
     }
 }
