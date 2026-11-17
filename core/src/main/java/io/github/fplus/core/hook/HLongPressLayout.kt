@@ -1,7 +1,6 @@
+// Kotlin · HLongPressLayout.kt · Android API 24 / Xposed · 按 View 隔离触摸会话
 package io.github.fplus.core.hook
 
-import android.content.Context
-import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -23,6 +22,9 @@ import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
 import io.github.fplus.core.helper.DexkitBuilder
 import io.github.fplus.core.helper.ModuleSettingHelper
+import io.github.fplus.core.helper.TapGestureState
+import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import io.github.fplus.core.hook.logic.DownloadLogic
 import io.github.fplus.core.hook.logic.cityInfo
 import io.github.fplus.core.hook.logic.createDate
@@ -50,9 +52,6 @@ class HLongPressLayout : BaseHook() {
             "com.ss.android.ugc.aweme.ad.feed.VideoViewHolderRootView"
 
         private const val TAG = "HLongPressLayout"
-
-        /** 双击后检查播放状态的延时（ms）：抖音的「单击确认」一般在抬手后 ~300ms 触发 */
-        private const val RESUME_CHECK_DELAY = 500L
 
         /** 评论按钮的 contentDescription，按「严 → 宽」排列，命中即用 */
         private val COMMENT_BUTTON_DESCRIPTIONS = listOf(
@@ -85,275 +84,172 @@ class HLongPressLayout : BaseHook() {
     private val LONG_PRESS_TIME = ViewConfiguration.getLongPressTimeout()
     private val DOUBLE_TAP_TIME = ViewConfiguration.getDoubleTapTimeout()
 
-    private var longPressRunnable: Runnable? = null
-
-    /** 上一次「有效轻点」抬起时的 eventTime 与按下坐标；仅在按下未移动、且未变成长按时才有效 */
-    private var lastTapUpTime: Long = 0
-    private var lastTapX: Float = 0f
-    private var lastTapY: Float = 0f
-    private var lastTapValid: Boolean = false
-
-    /** 当前手势的按下时间、按下坐标、是否已被拖动 */
-    private var downEventTime: Long = 0
-    private var downX: Float = 0f
-    private var downY: Float = 0f
-    private var gestureMoved: Boolean = false
-
-    /** 当前手势已被判定为「双击的第二下」时，需要按策略吞掉的档位；null 表示不接管 */
-    private var swallowPolicy: SwallowPolicy? = null
-
-    /** 正在向宿主补发合成事件（CANCEL / 恢复播放的单击），这些事件不能再走状态机 */
-    private var injectingEvent: Boolean = false
-
-    private var touchSlopCache: Int = -1
-    private var doubleTapSlopCache: Int = -1
-
-    private var aweme: Aweme? = null
-
-    override fun setTargetClass(): Class<*> {
-        return findClass("com.ss.android.ugc.aweme.feed.ui.LongPressLayout")
+    private class ViewState(timeout: Long) {
+        val tap = TapGestureState(timeout)
+        var long_press: Runnable? = null
+        var policy: SwallowPolicy? = null
+        var injecting = false
+        var rebound_event: MotionEvent? = null
+        var rebound_dx = 0f
     }
 
-    /**
-     * 触摸状态机。
-     *
-     * 放在 `@OnBefore` 而不是 `@OnAfter`：只有赶在抖音自己的 `onTouchEvent` 之前，
-     * 才能通过 `setResult(true)` 把双击的第二下整体拦下来，原生点赞才不会触发。
-     * 长按逻辑一并迁到这里 —— 原先的 `longPressRunnable` 只创建一次并把第一次
-     * ACTION_DOWN 的 MotionEvent 永久缓存下来，导致长按的区域判定（上/下半屏）一直用旧坐标。
-     */
+    private val states = WeakHashMap<View, ViewState>()
+    private val detach_listener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) = Unit
+        override fun onViewDetachedFromWindow(view: View) {
+            states.remove(view)?.let { cancelLongPress(it); it.tap.cancel() }
+            view.removeOnAttachStateChangeListener(this)
+        }
+    }
+    private var aweme: Aweme? = null
+
+    override fun setTargetClass(): Class<*> = findClass("com.ss.android.ugc.aweme.feed.ui.LongPressLayout")
+
     @OnBefore("onTouchEvent")
     fun onTouchEventBefore(params: MethodParam, event: MotionEvent) {
         hookBlockRunning(params) {
-            // 模块自己补发的事件不参与状态机，否则会被当成一次真实轻点
-            if (injectingEvent)
-                return@hookBlockRunning
-
             val view = thisViewOrNull ?: return@hookBlockRunning
-
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> onGestureDown(params, view, event)
-                MotionEvent.ACTION_MOVE -> onGestureMove(params, view, event)
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> onGestureUp(params, event)
+            val state = states.getOrPut(view) {
+                view.addOnAttachStateChangeListener(detach_listener)
+                ViewState(LONG_PRESS_TIME.toLong())
             }
-        }.onFailure {
-            XplerLog.e(it)
-        }
-    }
-
-    private fun onGestureDown(params: MethodParam, view: View, event: MotionEvent) {
-        downEventTime = event.eventTime
-        downX = event.x
-        downY = event.y
-        gestureMoved = false
-        swallowPolicy = null
-
-        // 双击判定与 GestureDetector 对齐：在第二次 ACTION_DOWN 就成立
-        if (lastTapValid) {
-            val interval = event.eventTime - lastTapUpTime
-            val slop = doubleTapSlop(view.context)
-            val samePlace = Math.abs(event.x - lastTapX) <= slop
-                    && Math.abs(event.y - lastTapY) <= slop
-            if (interval in 0..DOUBLE_TAP_TIME.toLong() && samePlace) {
-                val policy = handleDoubleTap(view)
-                if (policy != null) {
-                    swallowPolicy = policy
-                    cancelLongPress()
-                    lastTapValid = false
-                    if (policy == SwallowPolicy.SWALLOW_ALL) {
-                        params.setResult(true)
-                    } else {
-                        // 把这一下的横坐标挪到屏幕另一端再交给抖音：
-                        // 位置对不上 → 不判定双击（不点赞），但收到 DOWN 会让它撤掉待确认的单击（不暂停）。
-                        // 仍留在 View 内，保证事件被消费掉，不会漏给上层 ViewPager。
-                        val targetX = if (downX < screenSize.width / 2) screenSize.width - 2f else 2f
-                        event.offsetLocation(targetX - downX, 0f)
+            if (state.injecting) return@hookBlockRunning
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> onGestureDown(params, view, state, event)
+                MotionEvent.ACTION_MOVE -> {
+                    if (state.tap.move(event.x, event.y, ViewConfiguration.get(view.context).scaledTouchSlop)) {
+                        cancelLongPress(state)
                     }
-                    return
+                    if (state.policy != null) params.setResult(true)
+                }
+                MotionEvent.ACTION_POINTER_DOWN, MotionEvent.ACTION_POINTER_UP -> {
+                    state.tap.multiple()
+                    cancelLongPress(state)
+                    if (state.policy != null) params.setResult(true)
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    cancelLongPress(state)
+                    state.tap.finish(event.eventTime, event.actionMasked == MotionEvent.ACTION_CANCEL)
+                    if (state.policy != null) params.setResult(true)
+                    state.policy = null
                 }
             }
-        }
+        }.onFailure { XplerLog.e(it) }
+    }
 
-        cancelLongPress()
-        val runnable = Runnable { onLongPress(view, downX, downY) }
-        longPressRunnable = runnable
+    @OnAfter("onTouchEvent")
+    fun onTouchEventAfter(params: MethodParam, event: MotionEvent) {
+        hookBlockRunning(params) {
+            val view = thisViewOrNull ?: return@hookBlockRunning
+            val state = states[view] ?: return@hookBlockRunning
+            if (state.injecting || state.rebound_event !== event) return@hookBlockRunning
+            val dx = state.rebound_dx
+            state.rebound_event = null
+            state.rebound_dx = 0f
+            // 不污染父容器继续使用的原始 MotionEvent；宿主已用副本记录第二次 DOWN。
+            event.offsetLocation(-dx, 0f)
+            // 第二次 DOWN 撤掉首击确认后立即 CANCEL，关闭宿主长按和 pressed 状态。
+            val cancel = MotionEvent.obtain(event)
+            cancel.action = MotionEvent.ACTION_CANCEL
+            state.injecting = true
+            try { view.onTouchEvent(cancel) } finally { cancel.recycle(); state.injecting = false }
+            if (!params.hasThrowable) params.setResult(true)
+        }.onFailure { XplerLog.e(it) }
+    }
+
+    private fun onGestureDown(params: MethodParam, view: View, state: ViewState, event: MotionEvent) {
+        // 另一个 View 收到新手势时，旧 View 的延时长按不能继续生效。
+        states.entries.toList().forEach { (other_view, other_state) ->
+            cancelLongPress(other_state)
+            if (other_view !== view) other_state.tap.cancel()
+        }
+        state.policy = null
+        val configuration = ViewConfiguration.get(view.context)
+        val media_id = currentMediaId()
+        val candidate = state.tap.begin(event.eventTime, event.x, event.y,
+            DOUBLE_TAP_TIME.toLong(), configuration.scaledDoubleTapSlop, media_id)
+        if (candidate && config.isDoubleClickType && config.doubleClickType == 1 && !HDetailPageFragment.isComment) {
+            val keep_paused = !HPlayerController.isPlaying
+            val policy = if (config.doubleClickPauseVideo && !keep_paused) SwallowPolicy.SWALLOW_ALL else SwallowPolicy.REBOUND_DOWN
+            // 太窄的容器无法在内部构造足够远的 DOWN，未知布局直接保留原生响应。
+            if ((policy == SwallowPolicy.SWALLOW_ALL || view.width > configuration.scaledDoubleTapSlop * 2 + 2) &&
+                hasCommentButton(view)) {
+                state.tap.consume()
+                state.policy = policy
+                val generation = state.tap.generation
+                val weak_view = WeakReference(view)
+                handler.post {
+                    val target = weak_view.get()
+                    if (target != null && target.isAttachedToWindow && target.isShown &&
+                        states[target] === state && state.tap.generation == generation && currentMediaId() == media_id) {
+                        openCommentPanel(target)
+                    }
+                }
+                if (policy == SwallowPolicy.SWALLOW_ALL) {
+                    params.setResult(true)
+                } else {
+                    val target_x = if (event.x < view.width / 2f) view.width - 1f else 1f
+                    state.rebound_dx = target_x - event.x
+                    state.rebound_event = event
+                    event.offsetLocation(state.rebound_dx, 0f)
+                }
+                return
+            }
+        }
+        val x = event.x
+        val y = event.y
+        val generation = state.tap.generation
+        val weak_view = WeakReference(view)
+        val runnable = Runnable {
+            val target = weak_view.get()
+            if (target != null && target.isAttachedToWindow && target.isShown && state.tap.active &&
+                !state.tap.moved && state.tap.generation == generation && currentMediaId() == media_id) {
+                state.tap.long_press()
+                onLongPress(target, x, y)
+            }
+        }
+        state.long_press = runnable
         handler.postDelayed(runnable, LONG_PRESS_TIME.toLong())
     }
 
-    private fun onGestureMove(params: MethodParam, view: View, event: MotionEvent) {
-        // 双击的第二下已被接管：MOVE 一律不透给抖音
-        if (swallowPolicy != null) {
-            params.setResult(true)
-            return
-        }
-        if (gestureMoved)
-            return
+    private fun currentMediaId(): String? = HPlayerController.playingAid?.takeIf { it.isNotBlank() }
+        ?: runCatching { HVideoViewHolder.aweme?.aid }.getOrNull()?.takeIf { it.isNotBlank() }
 
-        val slop = touchSlop(view.context)
-        if (Math.abs(event.x - downX) > slop || Math.abs(event.y - downY) > slop) {
-            gestureMoved = true
-            cancelLongPress()
+    private fun hasCommentButton(view: View): Boolean {
+        val nearest = resolveHolderRoot(view, allowRootFallback = false)
+        val root = nearest ?: view.rootView
+        var count = 0
+        root.forEachWhereChild {
+            val rect = android.graphics.Rect()
+            if (it.isShown && it.isEnabled && it.getGlobalVisibleRect(rect) &&
+                COMMENT_BUTTON_DESCRIPTIONS.any { pattern -> it.contentDescription?.contains(pattern) == true }) count++
+            false
         }
+        // 窗口级兜底只在唯一可见评论入口时使用，防止误开预加载视频。
+        return if (nearest != null) count > 0 else count == 1
     }
 
-    private fun onGestureUp(params: MethodParam, event: MotionEvent) {
-        cancelLongPress()
-
-        val policy = swallowPolicy
-        swallowPolicy = null
-        if (policy != null) {
-            // 双击已由模块接管：抬起也吞掉，否则抖音会拿它再补一次「单击确认」
-            params.setResult(true)
-            lastTapValid = false
-            return
-        }
-
-        val isTap = event.actionMasked == MotionEvent.ACTION_UP
-                && !gestureMoved
-                && event.eventTime - downEventTime < LONG_PRESS_TIME
-        lastTapValid = isTap
-        lastTapUpTime = if (isTap) event.eventTime else 0
-        lastTapX = downX
-        lastTapY = downY
-    }
-
-    /**
-     * 双击命中后的处理；返回 null 表示「这次手势不接管，交给抖音」。
-     */
-    private fun handleDoubleTap(view: View): SwallowPolicy? {
-        if (!config.isDoubleClickType)
-            return null
-
-        // 点赞模式: 完全保持抖音原生行为
-        if (config.doubleClickType != 1)
-            return null
-
-        // 评论区详情页里再开一次评论没有意义
-        if (HDetailPageFragment.isComment)
-            return null
-
-        val pauseAfterOpen = config.doubleClickPauseVideo
-        val policy = if (pauseAfterOpen) SwallowPolicy.SWALLOW_ALL else SwallowPolicy.REBOUND_DOWN
-        val wasPlaying = HPlayerController.isPlaying
-        KLogCat.tagD(
-            TAG,
-            "双击命中: policy=$policy, pause=$pauseAfterOpen, playing=$wasPlaying",
-        )
-
-        handler.post { openCommentPanel(view) }
-
-        if (!pauseAfterOpen && wasPlaying) {
-            // 兜底：万一某种实现下仍然被暂停了，稍后再补一次单击把播放恢复回来
-            handler.postDelayed({ resumeIfPaused(view) }, RESUME_CHECK_DELAY)
-        }
-        return policy
-    }
-
-    /**
-     * 双击打开评论区后，如果视频被抖音当成「单击」暂停了，就补一次单击把播放切回来。
-     * 直接派发给宿主 View（不走窗口命中测试），评论区已经打开也照样生效。
-     */
-    private fun resumeIfPaused(view: View) {
-        try {
-            if (HPlayerController.isPlaying)
-                return
-
-            KLogCat.tagD(TAG, "双击后视频被暂停, 补一次单击恢复播放")
-            val now = SystemClock.uptimeMillis()
-            val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, downX, downY, 0)
-            val up = MotionEvent.obtain(now, now + 10, MotionEvent.ACTION_UP, downX, downY, 0)
-            injectingEvent = true
-            view.onTouchEvent(down)
-            view.onTouchEvent(up)
-            down.recycle()
-            up.recycle()
-        } catch (e: Throwable) {
-            XplerLog.e(e)
-        } finally {
-            injectingEvent = false
-        }
-    }
-
-    /**
-     * 打开评论区。找按钮的链路已在 38.6.0 上验证可用（连点时能打开），
-     * 这里只做降级与日志，方便后续版本漂移时定位。
-     */
     private fun openCommentPanel(view: View) {
         try {
-            val holderRootView = resolveHolderRoot(view, allowRootFallback = true)
-            if (holderRootView == null) {
-                KLogCat.tagW(TAG, "打开评论失败: 未找到视频项根容器")
-                return
+            if (!hasCommentButton(view)) return
+            val root = resolveHolderRoot(view, allowRootFallback = true) ?: return
+            if (!onClickView(root, targetContents = COMMENT_BUTTON_DESCRIPTIONS, skipClickThrottle = true)) {
+                KLogCat.tagW(TAG, "打开评论失败: 未找到可点击入口")
             }
-
-            val clicked = onClickView(
-                parent = holderRootView,
-                targetContents = COMMENT_BUTTON_DESCRIPTIONS,
-                skipClickThrottle = true,
-            )
-            if (clicked) {
-                KLogCat.tagD(TAG, "打开评论成功")
-            } else {
-                KLogCat.tagW(TAG, "打开评论失败: 未找到评论按钮")
-                KLogCat.tagW(TAG, "可用描述: ${describeChildren(holderRootView)}")
-            }
-        } catch (e: Throwable) {
-            XplerLog.e(e)
-        }
+        } catch (error: Exception) { XplerLog.e(error) }
     }
 
-    /**
-     * 解析视频项根容器。类名比较失败时按需回退到整窗口根 View。
-     */
     private fun resolveHolderRoot(view: View, allowRootFallback: Boolean): View? {
         var holder: View? = null
         view.forEachWhereParent { parent ->
-            if (parent.javaClass.name == VIDEO_VIEW_HOLDER_ROOT_VIEW) {
-                holder = parent
-                true
-            } else {
-                false
-            }
+            if (parent.javaClass.name == VIDEO_VIEW_HOLDER_ROOT_VIEW) { holder = parent; true } else false
         }
-        if (holder != null)
-            return holder
-
-        if (!allowRootFallback)
-            return null
-
-        KLogCat.tagW(TAG, "未命中根容器 $VIDEO_VIEW_HOLDER_ROOT_VIEW, 回退到窗口根 View")
-        return view.rootView
+        return holder ?: if (allowRootFallback) view.rootView else null
     }
 
-    /** 诊断用：列出子 View 上有意义的 contentDescription，便于新版本补匹配规则 */
-    private fun describeChildren(parent: View): String {
-        val descriptions = mutableListOf<String>()
-        parent.forEachWhereChild {
-            if (descriptions.size < 12) {
-                val description = it.contentDescription?.toString().orEmpty()
-                if (description.isNotBlank())
-                    descriptions.add(description)
-            }
-            false
-        }
-        return descriptions.joinToString(" | ").ifEmpty { "无" }
-    }
-
-    private fun cancelLongPress() {
-        longPressRunnable?.let { handler.removeCallbacks(it) }
-        longPressRunnable = null
-    }
-
-    private fun touchSlop(context: Context): Int {
-        if (touchSlopCache < 0)
-            touchSlopCache = ViewConfiguration.get(context).scaledTouchSlop
-        return touchSlopCache
-    }
-
-    private fun doubleTapSlop(context: Context): Int {
-        if (doubleTapSlopCache < 0)
-            doubleTapSlopCache = ViewConfiguration.get(context).scaledDoubleTapSlop
-        return doubleTapSlopCache
+    private fun cancelLongPress(state: ViewState) {
+        state.long_press?.let { handler.removeCallbacks(it) }
+        state.long_press = null
     }
 
     private fun onLongPress(view: View, x: Float, y: Float) {
@@ -579,8 +475,8 @@ class HLongPressLayout : BaseHook() {
             val location = IntArray(2) { 0 }
             it.getLocationOnScreen(location)
             if (location[1] > 0 && location[1] < screenSize.height) { // 是否在屏幕内
-                location[0] = location[0] + it.right / 2
-                location[1] = location[1] + it.bottom / 2
+                location[0] = location[0] + it.width / 2
+                location[1] = location[1] + it.height / 2
                 if (skipClickThrottle || !KViewUtils.isFastClick(200)) {
                     KAutomationUtils.simulateClickByView(it, location[0].toFloat(), location[1].toFloat())
                     clicked = true
@@ -639,23 +535,6 @@ class HLongPressLayout : BaseHook() {
                 }
         }
 
-        // 双击点赞事件拦截
-        DexkitBuilder.doubleClickEventClazz?.also {
-            lparam.hookClass(it)
-                .methodAllByParamTypes(
-                    View::class.java,
-                    MotionEvent::class.java,
-                    MotionEvent::class.java,
-                    MotionEvent::class.java,
-                ) {
-                    onBefore {
-                        if (!config.isDoubleClickType)
-                            return@onBefore
-
-                        if (config.doubleClickType == 1)
-                            setResultVoid()
-                    }
-                }
-        }
+        // 双击只由当前 View 的触摸链路处理；不再全局阻断未接管页面的点赞回调。
     }
 }

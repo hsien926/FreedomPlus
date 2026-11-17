@@ -1,3 +1,4 @@
+// Kotlin · KFileUtils.kt · JVM / Android API 21+ · 文件与媒体类型工具
 package com.freegang.ktutils.io
 
 import com.freegang.extension.superSplit
@@ -5,66 +6,39 @@ import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
 
-enum class FileKind(
-    val suffix: String,
-) {
-    // image
+enum class FileKind(val suffix: String) {
     JPG(".jpg"),
     PNG(".png"),
     HEIC(".heic"),
-    // 抖音"动态表情包"实测是 HEVC 编码的 ISO-BMFF 短视频(ftyp 主 brand = msf1,
-    // moov/trak 里是 hvc1 视频轨), 不是 GIF/WebP 动图. 必须给 .mp4 才播得出来,
-    // 否则任何看图工具只能解出首帧.
     MP4(".mp4"),
+    M4A(".m4a"),
     GIF(".gif"),
-    WEBP(".webp"),
-    ;
+    WEBP(".webp");
 
-    /**
-     * 判断文件头是否属于该类型。
-     *
-     * 关键点: 只比对格式定义里**固定不变**的字段。早期实现把整段文件头写成常量
-     * (如 GIF 带上了逻辑屏幕宽高、WEBP 带上了 RIFF 块长度), 那些字节随文件变化,
-     * 导致除了当初取样那个文件之外永远匹配不上 —— 动图因此一直沿用调用方给的
-     * 默认后缀, 被相册/微信按静态图片解码, 只剩首帧。
-     *
-     * @param bytes 文件头字节, 至少 12 字节
-     */
-    fun matches(bytes: ByteArray): Boolean {
-        if (bytes.size < 12) return false
-        return when (this) {
-            // SOI(FFD8) + 段标记起始(FF): APP0(JFIF) / APP1(EXIF) 等均适用
-            JPG -> bytes.hexAt(0, 2) == "ffd8" && bytes.hexAt(2, 3) == "ff"
-            PNG -> bytes.hexAt(0, 8) == "89504e470d0a1a0a"
-            // ISO-BMFF 容器: [4,8) 为 "ftyp", [8,12) 为 brand
-            // msf1 = HEIF image sequence / 抖音动态表情的 HEVC 短视频, 归到 MP4
-            MP4 -> bytes.hexAt(4, 8) == "66747970" && bytes.hexAt(8, 12) == "6d736631"
-            HEIC -> bytes.hexAt(4, 8) == "66747970" && bytes.hexAt(8, 12) in HEIF_BRANDS
-            // GIF87a / GIF89a; 其后 6 字节是逻辑屏幕描述符(宽高/调色板均可能不同), 不参与比较
-            GIF -> bytes.hexAt(0, 6) == "474946383761" || bytes.hexAt(0, 6) == "474946383961"
-            // RIFF + 4 字节块长度(随文件大小变化) + WEBP
-            WEBP -> bytes.hexAt(0, 4) == "52494646" && bytes.hexAt(8, 12) == "57454250"
-        }
+    /** 文件头只是容器提示；ISO-BMFF 完整文件必须进一步检查真实轨道。 */
+    fun matches(bytes: ByteArray): Boolean = when (this) {
+        JPG -> bytes.size >= 3 && bytes.hexAt(0, 3) == "ffd8ff"
+        PNG -> bytes.size >= 8 && bytes.hexAt(0, 8) == "89504e470d0a1a0a"
+        GIF -> bytes.size >= 6 && bytes.asciiAt(0, 6) in setOf("GIF87a", "GIF89a")
+        WEBP -> bytes.size >= 12 && bytes.asciiAt(0, 4) == "RIFF" && bytes.asciiAt(8, 12) == "WEBP"
+        HEIC -> bytes.isFtyp() && bytes.asciiAt(8, 12) in HEIF_BRANDS
+        MP4 -> bytes.isFtyp() && bytes.asciiAt(8, 12) in VIDEO_BRANDS
+        M4A -> bytes.isFtyp() && bytes.asciiAt(8, 12) in AUDIO_BRANDS
     }
 
     companion object {
-        /** HEIF 常见 brand. 刻意不含 MP4 的 isom/mp42/mp41, 避免视频被误判成图片. */
-        private val HEIF_BRANDS = setOf(
-            "68656963", // heic
-            "68656978", // heix
-            "6865696d", // heim
-            "68656973", // heis
-            "68657663", // hevc
-            "68657678", // hevx
-            "6d696631", // mif1
-            // 注意: 不要收 msf1 —— 那是 HEIF image sequence / 动态表情视频, 归 MP4
-        )
+        internal val HEIF_BRANDS = setOf("heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "msf1")
+        private val VIDEO_BRANDS = setOf("isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V ")
+        private val AUDIO_BRANDS = setOf("M4A ", "M4B ")
     }
 }
 
+private fun ByteArray.asciiAt(from: Int, to: Int): String =
+    if (from < 0 || to > size || from >= to) "" else String(this, from, to - from, Charsets.US_ASCII)
+
+private fun ByteArray.isFtyp(): Boolean = size >= 12 && asciiAt(4, 8) == "ftyp"
 private const val HEX_DIGITS = "0123456789abcdef"
 
-/** 取 [from, to) 区间字节的小写十六进制串, 越界返回空串 */
 private fun ByteArray.hexAt(from: Int, to: Int): String {
     if (from < 0 || to > size || from >= to) return ""
     val builder = StringBuilder((to - from) * 2)
@@ -84,6 +58,45 @@ object KFileUtils {
     @JvmStatic
     fun getFileKind(bytes: ByteArray): FileKind? {
         return FileKind.values().firstOrNull { it.matches(bytes) }
+    }
+
+    /** 头部识别用于普通图片，ISO-BMFF 必须校验完整 box 和真实轨道后才定扩展名。 */
+    @JvmStatic
+    fun getFileKind(file: File): FileKind? {
+        if (!file.isFile) return null
+        val head = try {
+            file.inputStream().use { input ->
+                val bytes = ByteArray(16)
+                var size = 0
+                while (size < bytes.size) {
+                    val count = input.read(bytes, size, bytes.size - size)
+                    if (count < 0) break
+                    if (count == 0) {
+                        val next = input.read()
+                        if (next < 0) break
+                        bytes[size++] = next.toByte()
+                    } else size += count
+                }
+                bytes.copyOf(size)
+            }
+        } catch (_: java.io.IOException) {
+            return null
+        } catch (_: SecurityException) {
+            return null
+        }
+        val headerKind = getFileKind(head)
+        if (headerKind != null && headerKind !in setOf(FileKind.MP4, FileKind.HEIC, FileKind.M4A)) {
+            return headerKind
+        }
+        val info = IsoBmffInspector.probe(file) ?: return null
+        return when (info.handlerType) {
+            "vide" -> FileKind.MP4
+            "pict" -> FileKind.HEIC
+            "soun" -> FileKind.M4A
+            else -> if (info.handlerTypes.isEmpty() && info.majorBrand in FileKind.HEIF_BRANDS) {
+                FileKind.HEIC
+            } else null
+        }
     }
 
     /**

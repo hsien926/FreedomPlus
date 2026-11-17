@@ -31,17 +31,6 @@ open class BaseActivity : Activity(),
     ViewModelStoreOwner,
     SavedStateRegistryOwner,
     OnBackPressedDispatcherOwner {
-    private companion object {
-        /**
-         * Compose 的 rememberSaveable 状态在 Activity savedInstanceState 里的 key。
-         *
-         * 这些值可能是「模块内的类」（如 `androidx.compose.material.DrawerValue`，
-         * Scaffold 内部默认的 DrawerState 就会存它），恢复时由宿主 ClassLoader 反序列化
-         * 必然 ClassNotFoundException；设置项持久化在 MMKV，不依赖它，直接丢弃最稳。
-         */
-        const val COMPOSE_SAVEABLE_STATE_KEY = "androidx.compose.ui.platform.DisposableSaveableStateRegistry"
-    }
-
     private val mContextAwareHelper = ContextAwareHelper()
 
     // lifecycle
@@ -58,8 +47,11 @@ open class BaseActivity : Activity(),
     private var _viewModelStore: ViewModelStore? = null
 
     override val viewModelStore: ViewModelStore
-        get() = _viewModelStore ?: ViewModelStore()
-            .also { _viewModelStore = ViewModelStore() }
+        get() = _viewModelStore ?: (lastNonConfigurationInstance as? ViewModelStore ?: ViewModelStore())
+            .also { _viewModelStore = it }
+
+    @Deprecated("Deprecated in Java")
+    override fun onRetainNonConfigurationInstance(): Any? = _viewModelStore
 
     // instance state
     private var _savedStateRegistryController: SavedStateRegistryController? = null
@@ -100,25 +92,25 @@ open class BaseActivity : Activity(),
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // 模块设置页运行在抖音进程内, 这里的 Bundle 是宿主 ActivityThread 造出来的,
-        // 默认 classloader 是抖音(或其插件)的 ClassLoader。Compose 的 rememberSaveable
-        // 会把 androidx.compose.material.DrawerValue（Scaffold 内部默认的 DrawerState）等
-        // 「模块内的类」当成 Java Serializable 写进这个 Bundle；页面重建时 android.os.Parcel
-        // 用宿主 classloader 反序列化, 找不到模块内的 compose 类, 直接抛
-        // BadParcelableException: ClassNotFoundException(DrawerValue) 闪退。
-        // 换成 PluginClassloader（先模块、后宿主）后两边都能解析。
-        runCatching {
-            savedInstanceState?.let { state ->
-                state.classLoader = classLoader
-                // 双保险：即使上面换 loader 失败，也不让 Compose 再去反序列化模块内的类
-                state.remove(COMPOSE_SAVEABLE_STATE_KEY)
+        // 保存状态使用插件加载器；不删除并非真实 provider key 的 Compose 名称。
+        val restored_state = try {
+            savedInstanceState?.let { original ->
+                Bundle(original).apply {
+                    classLoader = this@BaseActivity.classLoader
+                    keySet() // 提前展开，损坏 Parcel 不进入已开始恢复的 registry。
+                    getBundle("androidx.lifecycle.BundlableSavedStateRegistry.key")?.apply {
+                        classLoader = this@BaseActivity.classLoader
+                        keySet()
+                    }
+                }
             }
+        } catch (error: android.os.BadParcelableException) {
+            // 设置本身在 MMKV；仅放弃不可反序列化的临时界面状态。
+            null
         }
-        // Restore the Saved State first so that it is available to
-        // OnContextAvailableListener instances
-        savedStateRegistryController.performRestore(savedInstanceState)
+        savedStateRegistryController.performRestore(restored_state)
         mContextAwareHelper.dispatchOnContextAvailable(this)
-        super.onCreate(savedInstanceState)
+        super.onCreate(restored_state)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
     }
 
@@ -146,7 +138,7 @@ open class BaseActivity : Activity(),
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         mContextAwareHelper.clearAvailableContext()
-        if (isChangingConfigurations) {
+        if (!isChangingConfigurations) {
             _viewModelStore?.clear()
         }
     }
