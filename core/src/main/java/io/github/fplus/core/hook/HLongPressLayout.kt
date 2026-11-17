@@ -91,6 +91,7 @@ class HLongPressLayout : BaseHook() {
         var injecting = false
         var rebound_event: MotionEvent? = null
         var rebound_dx = 0f
+        var source_logged = false
     }
 
     private val states = WeakHashMap<View, ViewState>()
@@ -164,6 +165,16 @@ class HLongPressLayout : BaseHook() {
             if (other_view !== view) other_state.tap.cancel()
         }
         state.policy = null
+        val video_gesture = isVideoGesture(view)
+        if (!state.source_logged) {
+            state.source_logged = true
+            KLogCat.tagI(TAG, "长按来源: video=$video_gesture, size=${view.width}x${view.height}")
+        }
+        // 评论行也使用 LongPressLayout；类名和局部坐标不能代表视频播放区。
+        if (!video_gesture || HCommentListPageFragment.isPanelShowing()) {
+            state.tap.cancel()
+            return
+        }
         val configuration = ViewConfiguration.get(view.context)
         val media_id = currentMediaId()
         val candidate = state.tap.begin(event.eventTime, event.x, event.y,
@@ -247,12 +258,21 @@ class HLongPressLayout : BaseHook() {
         return holder ?: if (allowRootFallback) view.rootView else null
     }
 
+    private fun isVideoGesture(view: View): Boolean = resolveHolderRoot(view, allowRootFallback = false) != null
+
+    private fun hasActiveVideoGesture(): Boolean = states.any { (view, state) ->
+        state.tap.active && state.long_press != null && isVideoGesture(view)
+    }
+
     private fun cancelLongPress(state: ViewState) {
         state.long_press?.let { handler.removeCallbacks(it) }
         state.long_press = null
     }
 
     private fun onLongPress(view: View, x: Float, y: Float) {
+        // DOWN 后评论可能才完成展开，延时入口必须再次检查。
+        if (!isVideoGesture(view) || HCommentListPageFragment.isPanelShowing()) return
+
         // 预留出长按快进
         if (x < screenSize.width / 8 || x > screenSize.width - screenSize.width / 8)
             return
@@ -506,6 +526,9 @@ class HLongPressLayout : BaseHook() {
                     Float::class.java,
                 ) {
                     onBefore {
+                        // 回调没有 View 参数，只拦截当前仍有效的视频手势；评论行回调放行。
+                        if (!hasActiveVideoGesture() || HCommentListPageFragment.isPanelShowing()) return@onBefore
+
                         val x = args[0] as Float
                         val y = args[1] as Float
 

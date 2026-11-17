@@ -1,11 +1,15 @@
 package io.github.fplus.core.hook
 
+import android.graphics.Rect
 import android.os.Bundle
 import android.view.View
 import com.freegang.extension.forEachWhereChild
 import com.freegang.extension.removeInParent
 import io.github.fplus.core.base.BaseHook
 import io.github.fplus.core.config.ConfigV1
+import io.github.fplus.core.helper.CommentPanelState
+import io.github.fplus.core.helper.findMethodDeclaringClass
+import com.freegang.ktutils.log.KLogCat
 import io.github.fplus.core.helper.DexkitBuilder
 import io.github.xpler.core.XplerLog
 import io.github.xpler.core.entity.HookEntity
@@ -14,13 +18,25 @@ import io.github.xpler.core.hookBlockRunning
 import io.github.xpler.core.proxy.MethodParam
 
 class HCommentListPageFragment : BaseHook() {
+    companion object {
+        private val panels = CommentPanelState<View> { view ->
+            view.isAttachedToWindow && view.isShown && view.windowVisibility == View.VISIBLE &&
+                view.getGlobalVisibleRect(Rect())
+        }
+
+        fun isPanelShowing(): Boolean = panels.is_open()
+    }
+
     private val config get() = ConfigV1.get()
 
     override fun setTargetClass(): Class<*> {
-        return DexkitBuilder.commentListPageFragmentClazz ?: NoneHook::class.java
+        // 40.6.0 的 onViewCreated 在父类声明，Xpler 只扫描目标类的 declaredMethods。
+        return findMethodDeclaringClass(DexkitBuilder.commentListPageFragmentClazz,
+            "onViewCreated", View::class.java, Bundle::class.java) ?: NoneHook::class.java
     }
 
     override fun onInit() {
+        KLogCat.tagI("HCommentListPageFragment", "评论生命周期声明类=${targetClass.name}")
         HCommentColorModeViewMode()
     }
 
@@ -31,7 +47,10 @@ class HCommentListPageFragment : BaseHook() {
         savedInstanceState: Bundle?,
     ) {
         hookBlockRunning(params) {
+            if (DexkitBuilder.commentListPageFragmentClazz?.isInstance(thisObject) != true) return@hookBlockRunning
+            bindVisiblePanel(view)
             view.forEachWhereChild {
+                bindVisiblePanel(it)
                 if (it.contentDescription?.toString()?.startsWith("搜索，") == true) {
                     it.removeInParent()
                     return@forEachWhereChild true
@@ -42,6 +61,12 @@ class HCommentListPageFragment : BaseHook() {
         }.onFailure {
             XplerLog.e(it)
         }
+    }
+
+    private fun bindVisiblePanel(view: View) {
+        if (view.javaClass.name != "com.ss.android.ugc.aweme.comment.widget.CommentNestedLayout") return
+        panels.bind(view)
+        KLogCat.tagI("HCommentListPageFragment", "评论可见面板已登记=${view.javaClass.name}")
     }
 
     // 评论颜色模式
