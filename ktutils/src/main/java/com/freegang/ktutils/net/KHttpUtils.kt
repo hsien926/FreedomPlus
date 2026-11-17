@@ -1,17 +1,12 @@
+// Kotlin · KHttpUtils.kt · Android API 21+ · HTTP 获取与完整媒体下载
 package com.freegang.ktutils.net
 
-import android.os.Build
-import com.freegang.extension.redefineSuffix
-import com.freegang.ktutils.io.KFileUtils
 import java.io.File
 import java.io.IOException
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
 
 object KHttpUtils {
     val ANDROUD_UA get() = System.getProperty("http.agent")
@@ -25,13 +20,9 @@ object KHttpUtils {
         connect.instanceFollowRedirects = true
         connect.useCaches = false
         connect.doInput = true
-        connect.setRequestProperty("User-Agent", ANDROUD_UA)
+        ANDROUD_UA?.takeIf { it.isNotBlank() }?.let { connect.setRequestProperty("User-Agent", it) }
         connect.setRequestProperty("Accept", "*/*")
-        connect.setRequestProperty("Accept-Encoding", "identity");
-        // 如果是 HTTPS 请求，信任所有证书
-        if (connect is HttpsURLConnection) {
-            trustAllHosts()
-        }
+        connect.setRequestProperty("Accept-Encoding", "identity")
         return connect
     }
 
@@ -75,77 +66,34 @@ object KHttpUtils {
         return body
     }
 
-    /**
-     * 下载文件
-     * @param sourceUrl 目标URL地址
-     * @param output 输出流
-     * @param listener 下载监听器
-     */
+    /** 下载完整响应；不会覆盖已有目标，实际类型在完整文件写入后探测。 */
     @JvmStatic
     fun download(sourceUrl: String, file: File, listener: DownloadListener? = null): File? {
-        var newFile: File? = null
         var connect: HttpURLConnection? = null
-        var total = 0L
+        var total = -1L
         var realCount = 0L
         try {
             connect = commonConnection(URL(sourceUrl))
-            total = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                connect.contentLengthLong
-            } else {
-                connect.contentLength.toLong()
+            DownloadIntegrity.requireSuccessfulStatus(connect.responseCode)
+            val lengthHeader = connect.getHeaderField("Content-Length")
+            if (lengthHeader != null && connect.getHeaderField("Transfer-Encoding") != null) {
+                throw IOException("下载响应同时声明两种长度机制")
             }
-            val input = connect.inputStream.buffered()  // 非BufferedInputStream不支持mark/reset
-            input.use {
-                // 读取文件头，判断文件类型
-                val head = ByteArray(16)
-                input.read(head)
-                val kind = KFileUtils.getFileKind(head)
-                newFile = if (kind != null) {
-                    file.redefineSuffix(kind.suffix)
-                } else {
-                    file
-                }
-
-                // 开始下载
-                val output = newFile!!.outputStream()
-                output.use {
-                    it.write(head) // 写入文件头
-
-                    while (true) {
-                        val buffer = ByteArray(4096)
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        output.write(buffer, 0, count)
-                        realCount += count
-                        listener?.downloading(realCount, total, null)
-                    }
-                }
+            total = DownloadIntegrity.declaredLength(lengthHeader)
+            return DownloadIntegrity.save(connect.inputStream.buffered(), file, total) { count ->
+                realCount = count
+                listener?.downloading(count, total, null)
             }
-
-            return newFile
         } catch (e: Exception) {
             e.printStackTrace()
-            listener?.downloading(realCount, total, e)
+            runCatching { listener?.downloading(realCount, total, e) }
+            return null
+        } finally {
+            connect?.disconnect()
         }
-
-        return null
     }
 
     fun interface DownloadListener {
         fun downloading(real: Long, total: Long, e: Throwable?)
-    }
-
-    /**
-     * 信任所有证书
-     */
-    private fun trustAllHosts() {
-        try {
-            HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
-            val sslContext = SSLContext.getInstance("TLS")
-            sslContext.init(null, arrayOf<TrustManager>(TrustAllCerts()), null)
-            HttpsURLConnection.setDefaultSSLSocketFactory(sslContext.socketFactory)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
     }
 }

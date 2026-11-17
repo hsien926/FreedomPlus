@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.widget.TextView
 import com.freegang.extension.contentView
-import com.freegang.extension.findFieldGetValue
+import com.freegang.extension.findField
 import com.freegang.extension.firstOrNull
 import com.freegang.extension.postDelayedRunning
 import com.ss.android.ugc.aweme.base.model.UrlModel
@@ -34,8 +34,13 @@ class HEmojiDetailDialogNew : BaseHook() {
                     if (args.isEmpty())
                         return@onBefore
 
-                    val url = args[0]?.findFieldGetValue<UrlModel> { type(UrlModel::class.java) }
-                    urlList = url?.urlList ?: emptyList()
+                    // 同 HEmojiDetailDialog: 取第一个 urlList 非空的 UrlModel 字段, 列表为空不算取到.
+                    urlList = args[0]
+                        ?.findField { type(UrlModel::class.java) }
+                        ?.getValues(args[0])
+                        ?.filterIsInstance<UrlModel>()
+                        ?.firstNotNullOfOrNull { model -> model.urlList?.takeIf { it.isNotEmpty() } }
+                        ?: emptyList()
                 }
             }
 

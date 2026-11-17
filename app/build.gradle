@@ -23,6 +23,21 @@ def keystorePropsFile = rootProject.file("keystore.properties")
 if (keystorePropsFile.exists()) {
     keystorePropsFile.withInputStream { keystoreProps.load(it) }
 }
+// ---------------------------------------------------------------------------
+// 版本号后缀（云端开发构建用）
+//
+//   ./gradlew assembleDebug -PversionSuffix=97d7  ->  versionName "1.3.12.97d7"
+//
+// CI 取当次提交 SHA 的前 12 位十六进制传入，便于从安装包/崩溃日志里的「模块版本」
+// 直接回溯到具体提交。打 v* 标签的发布构建与本地构建都不传该参数，
+// versionName 保持 "1.3.12"，以免 tag 校验、Release 名称与 APK 文件名被开发构建污染。
+// ---------------------------------------------------------------------------
+// CI 使用十二位提交哈希；保留手动四至十二位十六进制后缀的兼容性。
+def versionSuffix = project.findProperty("versionSuffix")?.toString()?.trim()
+if (versionSuffix && !(versionSuffix ==~ /[0-9a-f]{4,12}/)) {
+    throw new GradleException("versionSuffix 必须为 4 至 12 位小写十六进制提交标识")
+}
+
 def hasSigningConfig = keystoreProps.getProperty("storeFile") != null
 def resolvedStoreFile = hasSigningConfig
         ? (rootProject.file(keystoreProps.getProperty("storeFile")).exists()
@@ -41,6 +56,12 @@ android {
 
         versionCode 148
         versionName "1.3.12"
+        // 云端开发构建：追加提交短哈希（见文件顶部说明）。tag 发布与本地构建不受影响。
+        // 注意 versionCode 在同一版本线内保持不变：同版本号覆盖安装系统允许，也避免开发包
+        // 的 versionCode 高于后续正式版本导致「降级装不上」。
+        if (versionSuffix) {
+            versionName = "${versionName}.${versionSuffix}"
+        }
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -107,23 +128,25 @@ android {
         }
     }
 
-    // 更新version的内容
-    tasks.register("updateVersionFile") {
-        def versionName = android.defaultConfig.versionName
-        def versionCode = android.defaultConfig.versionCode
-        def versionContent = versionName + "-" + versionCode
-
-        File versionFile = file("src/main/assets/version")
-        versionFile.write(versionContent)
+    def versionAsset = file("src/main/assets/version")
+    def updateVersionFile = tasks.register("updateVersionFile") {
+        inputs.property("moduleVersionName", android.defaultConfig.versionName)
+        inputs.property("moduleVersionCode", android.defaultConfig.versionCode)
+        outputs.file(versionAsset)
+        doLast {
+            versionAsset.write("${android.defaultConfig.versionName}-${android.defaultConfig.versionCode}", "UTF-8")
+        }
+    }
+    tasks.matching {
+        it.name == "mergeDebugAssets" || it.name == "mergeReleaseAssets" || it.name.toLowerCase().contains("lint")
+    }.configureEach {
+        dependsOn updateVersionFile
     }
 
-    //执行task任务
     applicationVariants.configureEach { variant ->
         variant.assembleProvider.get().dependsOn updateVersionFile
-
         variant.outputs.configureEach { output ->
-            def filename = "freedom+_" + android.defaultConfig.versionName + ".apk"
-            output.outputFileName filename
+            output.outputFileName = "freedom+_${android.defaultConfig.versionName}.apk"
         }
     }
 }

@@ -47,8 +47,11 @@ open class BaseActivity : Activity(),
     private var _viewModelStore: ViewModelStore? = null
 
     override val viewModelStore: ViewModelStore
-        get() = _viewModelStore ?: ViewModelStore()
-            .also { _viewModelStore = ViewModelStore() }
+        get() = _viewModelStore ?: (lastNonConfigurationInstance as? ViewModelStore ?: ViewModelStore())
+            .also { _viewModelStore = it }
+
+    @Deprecated("Deprecated in Java")
+    override fun onRetainNonConfigurationInstance(): Any? = _viewModelStore
 
     // instance state
     private var _savedStateRegistryController: SavedStateRegistryController? = null
@@ -89,11 +92,25 @@ open class BaseActivity : Activity(),
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Restore the Saved State first so that it is available to
-        // OnContextAvailableListener instances
-        savedStateRegistryController.performRestore(savedInstanceState)
+        // 保存状态使用插件加载器；不删除并非真实 provider key 的 Compose 名称。
+        val restored_state = try {
+            savedInstanceState?.let { original ->
+                Bundle(original).apply {
+                    classLoader = this@BaseActivity.classLoader
+                    keySet() // 提前展开，损坏 Parcel 不进入已开始恢复的 registry。
+                    getBundle("androidx.lifecycle.BundlableSavedStateRegistry.key")?.apply {
+                        classLoader = this@BaseActivity.classLoader
+                        keySet()
+                    }
+                }
+            }
+        } catch (error: android.os.BadParcelableException) {
+            // 设置本身在 MMKV；仅放弃不可反序列化的临时界面状态。
+            null
+        }
+        savedStateRegistryController.performRestore(restored_state)
         mContextAwareHelper.dispatchOnContextAvailable(this)
-        super.onCreate(savedInstanceState)
+        super.onCreate(restored_state)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
     }
 
@@ -121,7 +138,7 @@ open class BaseActivity : Activity(),
         super.onDestroy()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         mContextAwareHelper.clearAvailableContext()
-        if (isChangingConfigurations) {
+        if (!isChangingConfigurations) {
             _viewModelStore?.clear()
         }
     }

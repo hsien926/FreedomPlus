@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.widget.TextView
 import com.freegang.extension.contentView
-import com.freegang.extension.findFieldGetValue
+import com.freegang.extension.findField
 import com.freegang.extension.firstOrNull
 import com.ss.android.ugc.aweme.base.model.UrlModel
 import com.ss.android.ugc.aweme.emoji.store.view.EmojiBottomSheetDialog
@@ -71,8 +71,14 @@ class HEmojiDetailDialog : BaseHook(), CallMethods {
             if (!config.isEmojiDownload) return
             if (urlList.isNotEmpty()) return
 
-            val urlModel = thisObject?.findFieldGetValue<UrlModel> { type(UrlModel::class.java) }
-            urlList = urlModel?.urlList ?: emptyList()
+            // 取第一个 urlList 非空的 UrlModel 字段.
+            // 旧实现只取"首个 UrlModel 字段", 一旦该字段(通常是 animateUrl)列表为空, 就永远保存不了.
+            urlList = thisObject
+                ?.findField { type(UrlModel::class.java) }
+                ?.getValues(thisObject)
+                ?.filterIsInstance<UrlModel>()
+                ?.firstNotNullOfOrNull { model -> model.urlList?.takeIf { it.isNotEmpty() } }
+                ?: emptyList()
         }.onFailure {
             XplerLog.e(it)
         }

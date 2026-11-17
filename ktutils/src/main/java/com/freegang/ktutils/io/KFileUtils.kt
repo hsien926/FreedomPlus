@@ -1,3 +1,4 @@
+// Kotlin · KFileUtils.kt · JVM / Android API 21+ · 文件与媒体类型工具
 package com.freegang.ktutils.io
 
 import com.freegang.extension.superSplit
@@ -5,16 +6,47 @@ import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
 
-enum class FileKind(
-    val headHex: String,
-    val suffix: String,
-) {
-    // image
-    JPG("ffd8ffe000104a4649460001", ".jpg"),
-    PNG("89504e470d0a1a0a0000000d", ".png"),
-    HEIC("0000001C6674797068656963", ".heic"),
-    GIF("47494638376132013a01f700", ".gif"),
-    WEBP("52494646ea33000057454250", ".webp"),
+enum class FileKind(val suffix: String) {
+    JPG(".jpg"),
+    PNG(".png"),
+    HEIC(".heic"),
+    MP4(".mp4"),
+    M4A(".m4a"),
+    GIF(".gif"),
+    WEBP(".webp");
+
+    /** 文件头只是容器提示；ISO-BMFF 完整文件必须进一步检查真实轨道。 */
+    fun matches(bytes: ByteArray): Boolean = when (this) {
+        JPG -> bytes.size >= 3 && bytes.hexAt(0, 3) == "ffd8ff"
+        PNG -> bytes.size >= 8 && bytes.hexAt(0, 8) == "89504e470d0a1a0a"
+        GIF -> bytes.size >= 6 && bytes.asciiAt(0, 6) in setOf("GIF87a", "GIF89a")
+        WEBP -> bytes.size >= 12 && bytes.asciiAt(0, 4) == "RIFF" && bytes.asciiAt(8, 12) == "WEBP"
+        HEIC -> bytes.isFtyp() && bytes.asciiAt(8, 12) in HEIF_BRANDS
+        MP4 -> bytes.isFtyp() && bytes.asciiAt(8, 12) in VIDEO_BRANDS
+        M4A -> bytes.isFtyp() && bytes.asciiAt(8, 12) in AUDIO_BRANDS
+    }
+
+    companion object {
+        internal val HEIF_BRANDS = setOf("heic", "heix", "heim", "heis", "hevc", "hevx", "mif1", "msf1")
+        private val VIDEO_BRANDS = setOf("isom", "iso2", "iso3", "iso4", "iso5", "iso6", "mp41", "mp42", "avc1", "dash", "M4V ")
+        private val AUDIO_BRANDS = setOf("M4A ", "M4B ")
+    }
+}
+
+private fun ByteArray.asciiAt(from: Int, to: Int): String =
+    if (from < 0 || to > size || from >= to) "" else String(this, from, to - from, Charsets.US_ASCII)
+
+private fun ByteArray.isFtyp(): Boolean = size >= 12 && asciiAt(4, 8) == "ftyp"
+private const val HEX_DIGITS = "0123456789abcdef"
+
+private fun ByteArray.hexAt(from: Int, to: Int): String {
+    if (from < 0 || to > size || from >= to) return ""
+    val builder = StringBuilder((to - from) * 2)
+    for (index in from until to) {
+        val value = this[index].toInt() and 0xFF
+        builder.append(HEX_DIGITS[value ushr 4]).append(HEX_DIGITS[value and 0x0F])
+    }
+    return builder.toString()
 }
 
 object KFileUtils {
@@ -25,8 +57,46 @@ object KFileUtils {
      */
     @JvmStatic
     fun getFileKind(bytes: ByteArray): FileKind? {
-        val headHex = bytes.joinToString("") { String.format("%02x", it) }
-        return FileKind.values().firstOrNull { headHex.startsWith(it.headHex, true) }
+        return FileKind.values().firstOrNull { it.matches(bytes) }
+    }
+
+    /** 头部识别用于普通图片，ISO-BMFF 必须校验完整 box 和真实轨道后才定扩展名。 */
+    @JvmStatic
+    fun getFileKind(file: File): FileKind? {
+        if (!file.isFile) return null
+        val head = try {
+            file.inputStream().use { input ->
+                val bytes = ByteArray(16)
+                var size = 0
+                while (size < bytes.size) {
+                    val count = input.read(bytes, size, bytes.size - size)
+                    if (count < 0) break
+                    if (count == 0) {
+                        val next = input.read()
+                        if (next < 0) break
+                        bytes[size++] = next.toByte()
+                    } else size += count
+                }
+                bytes.copyOf(size)
+            }
+        } catch (_: java.io.IOException) {
+            return null
+        } catch (_: SecurityException) {
+            return null
+        }
+        val headerKind = getFileKind(head)
+        if (headerKind != null && headerKind !in setOf(FileKind.MP4, FileKind.HEIC, FileKind.M4A)) {
+            return headerKind
+        }
+        val info = IsoBmffInspector.probe(file) ?: return null
+        return when (info.handlerType) {
+            "vide" -> FileKind.MP4
+            "pict" -> FileKind.HEIC
+            "soun" -> FileKind.M4A
+            else -> if (info.handlerTypes.isEmpty() && info.majorBrand in FileKind.HEIF_BRANDS) {
+                FileKind.HEIC
+            } else null
+        }
     }
 
     /**
