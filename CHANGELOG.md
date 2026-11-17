@@ -7,22 +7,24 @@
 
 ---
 
-## 待发布：PR #3 功能批次
+## 待发布：PR #3 审查整合
 
-### 新增
+### 接收与修正
 
-- 设置 →「保存表情包/评论视频、图片」→「相关设置」新增「下载动图格式」（跟随源 / GIF / MP4，默认跟随源）。该项只描述期望格式：按素材真实容器落盘，期望与素材不一致时弹说明，本期不做 GIF/MP4 互转。选「MP4」时抖音的 HEVC 动图（含 `hdlr=pict` 的 HEIF 图像序列）统一命名 `.mp4`，与旧版行为一致；选「跟随源」才降级 `.heic` 并提示。
+- 保留 PR 的表情地址回退、固定魔数识别、双击设置、正常 bind 初始化和插件状态加载器修复。
+- 响应源过滤只构建新快照并安全替换字段；删除 clear/addAll 回退。临时空模型重试、成功缓存按模式及实例类型校验，失败不清空源列表。
+- 未验证的 Adapter 布局原样放行，停止逐份改写平行列表、位置接口和 bind 阻断；不宣称所有版本广告已去除。
+- ISO-BMFF 按 box 边界解析真实轨道，跳过无关元数据，支持扩展大小和异常边界；公共下载统一区分视频、HEIF 与音频。
+- 动图格式选项参与地址选择；不转码时保持真实容器并精确提示，不通过改扩展名伪装 MP4。跟随源默认保留源地址优先级。
+- 公共下载正确处理短读取、长度校验和失败临时文件，不把截断内容报为完整成功。
+- 双击改为每个 View 独立会话，绑定视频身份，处理多指、拖动、取消和连续轻点；临时改写的 DOWN 在宿主处理后恢复，并以 CANCEL 收尾。移除 500ms 自动抢播兜底。
+- 设置状态使用插件加载器解析真实注册表 Bundle；不误删 Compose 名称，ViewModelStore 在配置重建中正确保留及复用。
+- CI 增加 PR 触发、Python 与核心 JVM 回归、真实 APK 包名版本断言以及入口和双侧高刷 DEX 执行体检查；只读编译，不上传正式密钥、不自动发布。
 
-### 修复
+### 验证边界
 
-- **双击视频响应类型不生效（38.6.0 实测）**：选「打开评论」后双击仍然只是点赞。原因有两个：① 模块手工维护的 `numberOfTaps` 计数器只在「两次抬起间隔 ≥300ms」时才置 1，双击后归零，后续快速连点会一直判不出来，所以表现为「点三下才打开评论区」；② 判定写在 `@OnAfter("onTouchEvent")` 的第二次 ACTION_UP，而抖音（与 `GestureDetector` 一致）在第二次 ACTION_DOWN 就已处理完双击点赞，判得再对也拦不住。现改为 `@OnBefore("onTouchEvent")` 内的手势状态机：第二次 ACTION_DOWN 命中（间隔 ≤ `getDoubleTapTimeout()`、位移 ≤ `getScaledDoubleTapSlop()`、上一手势是有效轻点）即判定双击，选「打开评论」时把该次手势整体吞掉，抖音侧收不到这次点击，原生点赞不会发生，同时异步点击评论按钮打开评论区；选「点赞视频」或主开关关闭时完全不介入。顺带修掉长按坐标的旧 bug（`longPressRunnable` 只创建一次，把第一次 ACTION_DOWN 的坐标永久缓存，导致上/下半屏判定一直用旧坐标）。
-- **双击设置项交互**：点击整行会先打开主开关再弹「请选择双击响应模式」，子标题显示当前模式；此前点整行只弹对话框、开关仍关闭，容易误以为设置不生效。
-- **双击打开评论区后视频被暂停**：吞掉第二下点击后，抖音会把这次手势当成「单击」，顺带暂停了播放。改为在命中双击时把第二次 `ACTION_DOWN` 的坐标挪到屏幕外再放行 —— 抖音据此撤掉「待确认的单击」（**不暂停**），又因为位置对不上不会判定为双击（**也不点赞**），随后的 MOVE/UP 仍由模块吞掉；另保留一次 500ms 后的播放状态兜底检查。「请选择双击响应模式」里「打开评论」右侧新增「暂停播放」开关（默认**关闭**），打开后保留抖音原生的暂停行为。
-- **Tab-switch crash (`FeedItemFragmentVM.getFeedAnimation()` NPE)**: on Douyin 31.7.1, leaving the home tab paused the current page, whose fragment VM had never been initialized because the module used to block `VideoViewHolder.bind`. The three view-holder level interceptors are removed, so `bind` runs normally and the VM is always created. A narrow guard is added: it swallows only a `NullPointerException` whose message contains `getFeedAnimation` / `FeedItemFragmentVM` (hooked on `FeedWidgetAnimComponent` and `FeedComponentsRoot` `handlePauseP`); every other exception still surfaces.
-- **Feed list sanitizing reverted to the whole-table path**: an earlier attempt removed items right before `notifyDataSetChanged()`. The adapter keeps several list copies and not all of them are reachable, so counts and items drifted apart — `getView` received null, which showed up as a black page and the `Aweme.setActivityId` NPE. That logic is removed entirely. Items are only filtered when the host replaces the whole table; anything inserted through positional APIs is passed through untouched and plays normally.
-- **Filtering moved to the feed response callback**: both presenters resolved by DexKit (`recommendFeedFetchPresenter` / `fullFeedFollowFetchPresenter`) expose `onSuccess`, so entries are dropped there — before the adapter is populated, which means no count/index bookkeeping is involved at all. The access path inside the callback is discovered adaptively and cached; if the path, the list or the write is unavailable, or filtering would empty the list, the data is passed through untouched and only one log line is emitted.
-- **设置页重建偶发闪退（`BadParcelableException: ClassNotFoundException androidx.compose.material.DrawerValue`）**：模块设置页跑在抖音进程内，Host 的 `savedInstanceState` 用了抖音（或其插件）的 ClassLoader；Compose 的 `rememberSaveable`（`Scaffold` 默认 `DrawerState`）把模块内的 compose 枚举按 Serializable 写进该 Bundle，重建时宿主 ClassLoader 解析不到，直接抛异常。现在 `BaseActivity.onCreate` 先把 Bundle 的 ClassLoader 换成 `PluginClassloader`（模块优先、宿主兜底）再恢复状态。
-- **HEIF 图像序列的落盘后缀**：抖音部分动图表情下发 `ftyp=msf1` + `hdlr=pict`（`HEIF/ImageSequence`）。现按 `moov/mdia/hdlr` 细分：选「MP4」时仍命名 `.mp4`（与旧版一致，系统相册/多数播放器可播，个别播放器只出首帧）；选「跟随源」或「GIF」时降级 `.heic` 并提示「相册可能仅显示首帧」。
+- 新增纯 JVM 和 Python 边界回归；Debug / Release 与 R8、签名及版本资产由构建验收记录确认。
+- 本批次只整合源码，不替换既有 1.3.12 发布包，不安装手机，不提高发布版本号。手势、设置重建和真实投放仍需宿主真机回归。
 
 ---
 
