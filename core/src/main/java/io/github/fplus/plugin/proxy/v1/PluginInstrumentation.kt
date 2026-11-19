@@ -36,15 +36,28 @@ class PluginInstrumentation(
     }
 
     override fun callActivityOnCreate(activity: Activity?, icicle: Bundle?) {
-        // proxyRes(activity)
-        injectRes(activity?.resources)
+        injectResForPluginActivity(activity)
         mBase.callActivityOnCreate(activity, icicle)
     }
 
     override fun callActivityOnCreate(activity: Activity?, icicle: Bundle?, persistentState: PersistableBundle?) {
-        // proxyRes(activity)
-        injectRes(activity?.resources)
+        injectResForPluginActivity(activity)
         mBase.callActivityOnCreate(activity, icicle, persistentState)
+    }
+
+    /**
+     * 只给模块自己的代理 Activity 注入模块资源。
+     *
+     * 以前对宿主每个 Activity 都 addAssetPath，31.7.2 + Android 15 上会让 Theme 解析失败：
+     * `VisualSearchActivity` 启动时 `setContentView` 抛
+     * `IllegalStateException: You need to use a Theme.AppCompat theme`
+     * （外层包装成 `themeId:0xnull`）。模块 UI 用资源前都会自己 injectRes，
+     * 这里没必要碰宿主 Activity。
+     */
+    private fun injectResForPluginActivity(activity: Activity?) {
+        if (activity == null) return
+        if (activity.javaClass.name != stubActivity) return
+        injectRes(activity.resources)
     }
 
     override fun callActivityOnDestroy(activity: Activity?) {

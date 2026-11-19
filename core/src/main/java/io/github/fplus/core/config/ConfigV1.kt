@@ -22,6 +22,12 @@ class ConfigV1 private constructor() {
     )
 
     companion object {
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS = "videoOptionBarFilterKeywords"
+        private const val DEFAULT_VIDEO_OPTION_BAR_KEYWORDS = "拍同款，玩同款，推荐"
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED = "videoOptionBarFilterKeywordsMigratedV2"
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3 = "videoOptionBarFilterKeywordsMigratedV3"
+        private const val KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4 = "videoOptionBarFilterKeywordsMigratedV4"
+
         private val mmkv by lazy { MMKV.defaultMMKV() }
 
         private val config by lazy { ConfigV1() }
@@ -310,7 +316,7 @@ class ConfigV1 private constructor() {
             field = value
         }
 
-    /// 视频右侧控件栏
+    /// 视频左右两侧控制栏
     var isVideoOptionBarFilter: Boolean = false
         get() {
             field = mmkv.getBoolean("isVideoOptionBarFilter", false)
@@ -321,19 +327,119 @@ class ConfigV1 private constructor() {
             field = value
         }
 
-    /// 右侧控件栏类型关键字
-    val videoOptionBarFilterTypes = setOf("头像", "喜欢", "评论", "收藏", "分享", "少推荐", "音乐")
+    /// 左右两侧控制栏类型关键字
+    val videoOptionBarFilterTypes =
+        setOf("头像", "喜欢", "评论", "收藏", "分享", "拍同款", "玩同款", "推荐", "音乐")
 
-    /// 右侧控件栏隐藏关键字
-    var videoOptionBarFilterKeywords: String = "少推荐"
+    /// 左右两侧控制栏隐藏关键字
+    var videoOptionBarFilterKeywords: String = DEFAULT_VIDEO_OPTION_BAR_KEYWORDS
         get() {
-            field = mmkv.getString("videoOptionBarFilterKeywords", "少推荐")!!
+            field = migrateVideoOptionBarFilterKeywords(
+                mmkv.getString(KEY_VIDEO_OPTION_BAR_KEYWORDS, DEFAULT_VIDEO_OPTION_BAR_KEYWORDS)!!
+            )
             return field
         }
         set(value) {
-            mmkv.putString("videoOptionBarFilterKeywords", value)
+            mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, value)
             field = value
         }
+
+    /**
+     * 一次性迁移老关键字。
+     *
+     * 现版抖音已经没有「少推荐」，同一位置改叫「玩同款」，所以把残留的「少推荐」丢掉、
+     * 补上「玩同款」。只跑一次（写标记），之后完全尊重用户自己填的值；用户清空则保持为空。
+     */
+    private fun migrateVideoOptionBarFilterKeywords(raw: String): String {
+        return migrateVideoOptionBarFilterKeywordsV4(
+            migrateVideoOptionBarFilterKeywordsV3(migrateVideoOptionBarFilterKeywordsV2(raw))
+        )
+    }
+
+    /**
+     * 第三步迁移：「点击推荐」→「推荐」。
+     *
+     * 标签行内的匹配已放宽为「包含」，所以一个「推荐」就能同时覆盖「点击推荐」与
+     * 「共 1392 人推荐」；把老关键字里的「点击推荐」换成「推荐」，避免同一行只掉一半。
+     * 同样只跑一次，之后尊重用户填写。
+     */
+    private fun migrateVideoOptionBarFilterKeywordsV4(raw: String): String {
+        if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4, false)) {
+            return raw
+        }
+        mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V4, true)
+
+        if (raw.isBlank()) {
+            return raw
+        }
+
+        val tokens = raw.split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { if (it == "点击推荐") "推荐" else it }
+            .distinct()
+
+        val migrated = tokens.joinToString("，")
+        if (migrated != raw) {
+            mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
+        }
+        return migrated
+    }
+
+    private fun migrateVideoOptionBarFilterKeywordsV2(raw: String): String {
+        if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED, false)) {
+            return raw
+        }
+
+        if (raw.isBlank()) {
+            mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED, true)
+            return raw
+        }
+
+        val tokens = raw.split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "少推荐" }
+            .toMutableList()
+        if ("玩同款" !in tokens) {
+            tokens.add("玩同款")
+        }
+
+        val migrated = tokens.joinToString("，")
+        mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
+        mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED, true)
+        return migrated
+    }
+
+    /**
+     * 第二步迁移：补上「点击推荐」。
+     *
+     * 上一步只补了「玩同款」，从老默认值（少推荐，拍同款）迁过来的用户，关键字里就少了
+     * 左栏简介标签行那颗「点击推荐」。同样只跑一次，之后尊重用户填写。
+     */
+    private fun migrateVideoOptionBarFilterKeywordsV3(raw: String): String {
+        if (mmkv.getBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3, false)) {
+            return raw
+        }
+        mmkv.putBoolean(KEY_VIDEO_OPTION_BAR_KEYWORDS_MIGRATED_V3, true)
+
+        if (raw.isBlank()) {
+            return raw
+        }
+
+        val tokens = raw.split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .toMutableList()
+        if (tokens.none { it == "点击推荐" || it == "推荐" }) {
+            tokens.add("点击推荐")
+        }
+
+        val migrated = tokens.joinToString("，")
+        if (migrated != raw) {
+            mmkv.putString(KEY_VIDEO_OPTION_BAR_KEYWORDS, migrated)
+        }
+        return migrated
+    }
 
     /// 视频过滤
     var isVideoFilter: Boolean = false
@@ -551,6 +657,26 @@ class ConfigV1 private constructor() {
         }
         set(value) {
             mmkv.putBoolean("immersive", value)
+            field = value
+        }
+
+    /// 底 bar（相关搜索 / 上升热点）保持不透明。默认 false = 透明
+    var isRelatedSearchOpaque: Boolean = false
+        get() {
+            return mmkv.getBoolean("relatedSearchOpaque", false)
+        }
+        set(value) {
+            mmkv.putBoolean("relatedSearchOpaque", value)
+            field = value
+        }
+
+    /// 地点等「锚点」标签（RoundedLinearLayout）保持不透明。默认 false = 透明
+    var isLocationAnchorOpaque: Boolean = false
+        get() {
+            return mmkv.getBoolean("locationAnchorOpaque", false)
+        }
+        set(value) {
+            mmkv.putBoolean("locationAnchorOpaque", value)
             field = value
         }
 

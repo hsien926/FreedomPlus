@@ -97,7 +97,11 @@ class DouYinMain(private val app: Application) {
                     HVideoViewHolder()
                     HFeedPlayerView()
                     HFeedAvatarPresenter()
-                    HHomeBottomTabServiceImpl()
+                    // 底部渐变压暗层只由 HMainActivity 的布局监听在「直播页」上临时抹掉，
+                    // 不能全局 hook：普通视频页要靠它衬左下角文案，抹了会显得控件发虚。
+                    // 直播页把「讲解中」底栏上移一条 tab 高度，避免压在选项卡上
+                    HLivePlayerView()
+                    HHomeTopTabTouch()
                     HAbstractFeedAdapter()
                     HVerticalViewPager()
                     HDetailPageFragment()
@@ -116,6 +120,10 @@ class DouYinMain(private val app: Application) {
                     HFeedBindProbe()
                     // 运行时 View 树探针（诊断，默认关闭；用于定位 bottomCtrlBar 等静态无法收敛的控件）
                     HViewTreeDump()
+                    // 底 bar（相关搜索 / 上升热点）背景透明：挂 FeedCommonBottomBarPresenter 宿主
+                    HBottomBarBackground()
+                    // 地点等锚点卡片底色透明：直接拦 RoundedLinearLayout 的背景设置，避免先露底再变透明
+                    HAnchorBackground()
                     // 广告拦截：不依赖 DexKit 结果，放最后执行
                     HAdBlock()
                 }
