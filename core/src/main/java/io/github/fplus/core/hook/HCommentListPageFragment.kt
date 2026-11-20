@@ -49,14 +49,18 @@ class HCommentListPageFragment : BaseHook() {
         hookBlockRunning(params) {
             if (DexkitBuilder.commentListPageFragmentClazz?.isInstance(thisObject) != true) return@hookBlockRunning
             bindVisiblePanel(view)
-            view.forEachWhereChild {
-                bindVisiblePanel(it)
-                if (it.contentDescription?.toString()?.startsWith("搜索，") == true) {
-                    it.removeInParent()
-                    return@forEachWhereChild true
-                }
+            // 延迟到首帧之后：打开评论面板时不再同步遍历整棵评论树。
+            view.post {
+                if (!view.isAttachedToWindow) return@post
+                view.forEachWhereChild {
+                    bindVisiblePanel(it)
+                    if (it.contentDescription?.toString()?.startsWith("搜索，") == true) {
+                        it.removeInParent()
+                        return@forEachWhereChild true
+                    }
 
-                false
+                    false
+                }
             }
         }.onFailure {
             XplerLog.e(it)

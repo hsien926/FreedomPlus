@@ -1066,8 +1066,8 @@ class FreedomSettingActivity : XplerActivity() {
         var showFilterTips by remember { mutableStateOf(false) }
 
         SwitchItem(
-            text = "视频右侧控件栏",
-            subtext = "点击设置视频右侧控件栏显示项",
+            text = "视频左右两侧控制栏",
+            subtext = "点击设置视频左右两侧控制栏显示项",
             checked = model.isVideoOptionBarFilter.observeAsState(false),
             onClick = {
                 showFilterDialog = true
@@ -1594,6 +1594,8 @@ class FreedomSettingActivity : XplerActivity() {
             val systemControllerValue = model.systemControllerValue.value ?: listOf(false, false)
             val isHideStatusBar = remember { mutableStateOf(systemControllerValue[0]) }
             val isHideNavigateBar = remember { mutableStateOf(systemControllerValue[1]) }
+            val isRelatedSearchOpaque = remember { mutableStateOf(model.isRelatedSearchOpaque.value ?: false) }
+            val isLocationAnchorOpaque = remember { mutableStateOf(model.isLocationAnchorOpaque.value ?: false) }
             FMessageDialog(
                 title = "请选择系统隐藏项",
                 confirm = "更改",
@@ -1606,6 +1608,8 @@ class FreedomSettingActivity : XplerActivity() {
                             isHideNavigateBar.value,
                         )
                     )
+                    model.changeRelatedSearchOpaque(isRelatedSearchOpaque.value)
+                    model.changeLocationAnchorOpaque(isLocationAnchorOpaque.value)
                     showRestartAppDialog.value = true
                 },
             ) {
@@ -1623,6 +1627,22 @@ class FreedomSettingActivity : XplerActivity() {
                         checked = isHideNavigateBar,
                         onCheckedChange = {
                             isHideNavigateBar.value = it
+                        },
+                    )
+
+                    CheckBoxItem(
+                        text = "不透明相关搜索、热点等",
+                        checked = isRelatedSearchOpaque,
+                        onCheckedChange = {
+                            isRelatedSearchOpaque.value = it
+                        },
+                    )
+
+                    CheckBoxItem(
+                        text = "不透明地点标签",
+                        checked = isLocationAnchorOpaque,
+                        onCheckedChange = {
+                            isLocationAnchorOpaque.value = it
                         },
                     )
                 }
